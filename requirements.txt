@@ -11,3 +11,6 @@ python-dotenv
 requests
 streamlit-mic-recorder
 gTTS
+folium
+streamlit-folium
+python-docx
