@@ -23,8 +23,8 @@ COLORS = {
     "kritisch": "#ef4444", "gas": "#f59e0b", "strom": "#10b981", "fallback": "#3b82f6"
 }
 
-st.set_page_config(page_title="Energy-Service Map (Offline)", page_icon="🗺️", layout="wide")
-st.title("🗺️ Karte — Verbindungen (Offline)")
+st.set_page_config(page_title="STADTWERKE WÜLFRATH — Netz-Karte", page_icon="🗺️", layout="wide")
+st.title("🗺️ Netz-Karte — STADTWERKE WÜLFRATH")
 
 # 1) Load & ensure geo
 df = load_excel(DEFAULT_EXCEL_PATH)

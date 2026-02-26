@@ -32,7 +32,7 @@ load_dotenv()
 
 # ─────────────── Konfiguration ──────────────────────────────────────
 st.set_page_config(
-    page_title="Esc Utility Services — Energieinfrastruktur Intelligenz",
+    page_title="STADTWERKE WÜLFRATH — Infrastruktur-Intelligenz",
     page_icon="🏢",
     layout="wide",
 )
