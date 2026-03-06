@@ -11,7 +11,7 @@ Voraussetzungen
 Ordnerstruktur
 --------------
 EnergyBot_Online/
-  app.py, geo_utils.py, rag_engine.py, pages/2_Map.py
+  app.py, geo_utils.py, rag_engine.py
   requirements.txt, Dockerfile, compose.yaml, .dockerignore
   .env.example
   run_energybot_online.bat, stop_energybot_online.bat
