@@ -119,6 +119,18 @@ html, body, [data-testid="stAppViewContainer"] {
     background-color: #334155 !important;
     animation: pulse 1.5s infinite;
 }
+/* Small buttons for Chat/Voice controls */
+.stButton button {
+    font-size: 13px !important;
+    padding: 2px 10px !important;
+    min-height: 32px !important;
+}
+.small-btn-container button {
+    font-size: 11px !important;
+    padding: 2px 8px !important;
+    min-height: 28px !important;
+    white-space: nowrap !important;
+}
 @keyframes pulse {
     0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
     70% { box-shadow: 0 0 0 15px rgba(239, 68, 68, 0); }
@@ -601,10 +613,12 @@ elif active_tab == tab_labels[3]:
         
         # Action Buttons Row
         with col1:
-            btn_c1, _ = st.columns([1.5, 5.3])
-            if btn_c1.button("🗑️ Chat löschen", use_container_width=True):
+            st.markdown('<div class="small-btn-container">', unsafe_allow_html=True)
+            btn_c1, _ = st.columns([2, 5])
+            if btn_c1.button("🗑️ Chat löschen", use_container_width=True, help="Löscht den gesamten Chatverlauf"):
                 st.session_state.history = []
                 st.rerun()
+            st.markdown('</div>', unsafe_allow_html=True)
 
         with col2:
             st.markdown("**Strategische Analyse-vorgaben**")
@@ -700,10 +714,10 @@ elif active_tab == tab_labels[3]:
                     right: 20px;
                     z-index: 1000;
                     display: flex;
-                    gap: 10px;
+                    gap: 5px !important;
                     align-items: center;
                     background: white;
-                    padding: 10px;
+                    padding: 8px 12px;
                     border-radius: 50px;
                     box-shadow: 0 4px 15px rgba(0,0,0,0.1);
                     border: 1px solid #e2e8f0;
@@ -713,16 +727,16 @@ elif active_tab == tab_labels[3]:
             
             # Using columns inside a div for the floating effect
             f_col1, f_col2 = st.columns([1, 1])
-            with st.sidebar: # Temporary anchor to inject into floating space if possible, or just standard positioning
+            with st.sidebar: # Temporary anchor
                 pass 
                 
             # Direct placement in the flow, style will handle float
-            st.markdown('<div class="floating-controls">', unsafe_allow_html=True)
-            col_v1, col_v2 = st.columns([1, 1.2])
+            st.markdown('<div class="floating-controls small-btn-container">', unsafe_allow_html=True)
+            col_v1, col_v2 = st.columns([0.4, 2.6])
             with col_v1:
                 audio = mic_recorder(start_prompt="🎙️", stop_prompt="⏹️", just_once=True, key="mic_recorder")
             with col_v2:
-                if st.button("🛑 Stopp", key="stop_voice_floating"):
+                if st.button("🛑 Sprachausgabe stoppen", key="stop_voice_floating"):
                     st.session_state.speak_text = ""
                     st.rerun()
             st.markdown('</div>', unsafe_allow_html=True)
