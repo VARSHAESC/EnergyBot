@@ -140,6 +140,7 @@ if "map_zoom" not in st.session_state: st.session_state.map_zoom = 13
 if "last_utility" not in st.session_state: st.session_state.last_utility = None
 if "target_tab" not in st.session_state: st.session_state.target_tab = None
 if "last_map_idx" not in st.session_state: st.session_state.last_map_idx = None
+if "selected_customer_id" not in st.session_state: st.session_state.selected_customer_id = None
 
 # CRITICAL: If a target tab is set, override the logical and widget state BEFORE the UI renders
 if st.session_state.target_tab and st.session_state.target_tab in ["📉 Strategische Analyse", "🗺️ Netz-Karte", "🛡️ Compliance & Daten", "🤖 AI -Assistent"]:
@@ -397,6 +398,7 @@ if active_tab == tab_labels[0]:
                     if pd.notna(row["lat"]) and pd.notna(row["lon"]):
                         st.session_state.map_center = [row["lat"], row["lon"]]
                         st.session_state.map_zoom = 18
+                        st.session_state.selected_customer_id = str(row["Kundennummer"])
                         navigate_to(tab_labels[1], st.session_state.drilldown_type)
                     else:
                         st.warning("⚠️ Dieser Anschluss hat keine validen Koordinaten für die Karte.")
@@ -481,6 +483,8 @@ elif active_tab == tab_labels[1]:
                     if st.button("🗺️ Zoom zurücksetzen"):
                         st.session_state.map_center = None
                         st.session_state.map_zoom = 13
+                        st.session_state.selected_customer_id = None
+                        st.session_state.last_map_idx = None
                         st.rerun()
             
                 # Use Marker Cluster for better performance/look with 300+ markers
@@ -489,16 +493,17 @@ elif active_tab == tab_labels[1]:
                 # Color Mapping
                 FO_COLORS = {"Hoch": "red", "Mittel": "orange", "Niedrig": "green", "Unbekannt": "blue"}
                 
-                # Add Markers
+                # Add Markers to cluster
                 for _, row in map_df.iterrows():
                     risk_status = str(row["Risiko"])
                     color = FO_COLORS.get(risk_status, "blue")
+                    cust_id = str(row["Kundennummer"])
                     
                     # Professional Tooltip HTML
                     popup_content = f"""
                     <div style="font-family: 'Outfit', sans-serif; min-width: 220px; font-size: 13px;">
                         <h4 style="margin: 0 0 10px 0; color: #0f172a; border-bottom: 2px solid {color}; padding-bottom: 5px;">
-                            {row['Sparte']} - {row['Kundennummer']}
+                            {row['Sparte']} - {cust_id}
                         </h4>
                         <table style="width: 100%; border-collapse: collapse;">
                             <tr><td style="padding: 2px 0;"><b>📍 Ort:</b></td><td>{row['Straße']} {row['Hausnummer']}</td></tr>
@@ -515,6 +520,14 @@ elif active_tab == tab_labels[1]:
                         tooltip=f"{row['Sparte']} ({row['Straße']})",
                         icon=folium.Icon(color=color, icon="info-sign")
                     ).add_to(marker_cluster)
+
+                    # HIGHLIGHT SELECTED CUSTOMER: Add a special red icon outside Cluster
+                    if st.session_state.selected_customer_id == cust_id:
+                        folium.Marker(
+                            location=[row["lat"], row["lon"]],
+                            popup=folium.Popup(f"<b>AUSGEWÄHLTER ANSCHLUSS: {cust_id}</b>", max_width=250),
+                            icon=folium.Icon(color="red", icon="star", prefix="fa" if "fa" in "" else "glyphicon")
+                        ).add_to(m)
                 
                 # Display map inside the c_map column
                 st_folium(m, width="100%", height=700, key="main_network_map")
@@ -545,6 +558,7 @@ elif active_tab == tab_labels[1]:
                         row_map = map_df.iloc[idx]
                         if pd.notna(row_map["lat"]) and pd.notna(row_map["lon"]):
                             st.session_state.last_map_idx = idx
+                            st.session_state.selected_customer_id = str(row_map["Kundennummer"])
                             st.session_state.map_center = [row_map["lat"], row_map["lon"]]
                             st.session_state.map_zoom = 18
                             st.rerun()
