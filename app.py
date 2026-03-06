@@ -601,12 +601,9 @@ elif active_tab == tab_labels[3]:
         
         # Action Buttons Row
         with col1:
-            btn_c1, btn_c2, _ = st.columns([1.5, 2, 3])
+            btn_c1, _ = st.columns([1.5, 5.3])
             if btn_c1.button("🗑️ Chat löschen", use_container_width=True):
                 st.session_state.history = []
-                st.rerun()
-            if btn_c2.button("🛑 Sprache stoppen", use_container_width=True):
-                st.session_state.speak_text = ""
                 st.rerun()
 
         with col2:
@@ -691,10 +688,44 @@ elif active_tab == tab_labels[3]:
                     st.session_state.pending_action = None
                     st.session_state.history.append({"role": "bot", "content": "Die Aktualisierung wurde abgebrochen."})
                     st.rerun()
-        # Floating Voice Input
+        # Floating Voice Input & Stop Button
         with st.container():
             st.markdown('<div style="position:fixed; bottom:75px; right:70px; font-size:10px; color:#64748b; z-index:1001;">Click to Talk</div>', unsafe_allow_html=True)
-            audio = mic_recorder(start_prompt="🎙️", stop_prompt="⏹️ Listening...", just_once=True, key="mic_recorder")
+            # Create a small floating container for both buttons
+            st.markdown("""
+                <style>
+                .floating-controls {
+                    position: fixed;
+                    bottom: 20px;
+                    right: 20px;
+                    z-index: 1000;
+                    display: flex;
+                    gap: 10px;
+                    align-items: center;
+                    background: white;
+                    padding: 10px;
+                    border-radius: 50px;
+                    box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+                    border: 1px solid #e2e8f0;
+                }
+                </style>
+            """, unsafe_allow_html=True)
+            
+            # Using columns inside a div for the floating effect
+            f_col1, f_col2 = st.columns([1, 1])
+            with st.sidebar: # Temporary anchor to inject into floating space if possible, or just standard positioning
+                pass 
+                
+            # Direct placement in the flow, style will handle float
+            st.markdown('<div class="floating-controls">', unsafe_allow_html=True)
+            col_v1, col_v2 = st.columns([1, 1.2])
+            with col_v1:
+                audio = mic_recorder(start_prompt="🎙️", stop_prompt="⏹️", just_once=True, key="mic_recorder")
+            with col_v2:
+                if st.button("🛑 Stopp", key="stop_voice_floating"):
+                    st.session_state.speak_text = ""
+                    st.rerun()
+            st.markdown('</div>', unsafe_allow_html=True)
             if audio:
                 with st.spinner("Transkribiere..."):
                     res_voice = engine.transcribe_audio(audio['bytes'])
