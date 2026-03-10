@@ -59,7 +59,7 @@ def row_to_paragraph(row: Dict[str, Any], utility: str = "") -> str:
 # ─────────────── Vector Store ───────────────
 class VectorStore:
     def __init__(self, persist_dir: str = PERSIST_DIR, name: str = "energy_kb", embed_model: str = EMBED_MODEL_NAME):
-        self.client = chromadb.Client(Settings(persist_directory=persist_dir, anonymized_telemetry=False))
+        self.client = chromadb.PersistentClient(path=persist_dir, settings=Settings(anonymized_telemetry=False))
         try:
             self.col = self.client.get_collection(name)
         except Exception:
@@ -69,10 +69,10 @@ class VectorStore:
             self.client.delete_collection(name)
             self.col = self.client.create_collection(name, metadata={"embed_model": embed_model})
 
-    def reset(self):
+    def reset(self, metadata: Optional[Dict[str, Any]] = None):
         name = self.col.name
         self.client.delete_collection(name)
-        self.col = self.client.create_collection(name)
+        self.col = self.client.create_collection(name, metadata=metadata)
 
     def count(self) -> int:
         try: return self.col.count()
@@ -97,9 +97,13 @@ class EnergyRAG:
     def __init__(self, persist_dir: str = PERSIST_DIR, embed_model: str = EMBED_MODEL_NAME):
         self.vs = VectorStore(persist_dir, "energy_kb_multi", embed_model)
         self.embedder = Embedder(embed_model)
-        self.groq_api_key = os.getenv("GROQ_API_KEY")
-        self.groq_model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
-        self.groq_url = "https://api.groq.com/openai/v1/chat/completions"
+        
+        # --- Provider-Agnostic LLM Configuration ---
+        self.llm_api_key = os.getenv("LLM_API_KEY", os.getenv("GROQ_API_KEY"))
+        self.llm_model = os.getenv("LLM_MODEL_NAME", os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"))
+        # Base URL for OpenAI-compatible APIs (default to Groq if not specified)
+        self.llm_base_url = os.getenv("LLM_BASE_URL", "https://api.groq.com/openai/v1").rstrip("/")
+        
         self.unified_df = get_unified_df()
         self.reference_manual = self._load_reference_manual()
 
@@ -115,21 +119,25 @@ class EnergyRAG:
             return "Error loading Reference Manual."
 
     def check_llm_status(self) -> Dict[str, Any]:
-        if not self.groq_api_key:
-            return {"ok": False, "msg": "Groq API Key fehlt."}
+        if not self.llm_api_key:
+            return {"ok": False, "msg": "API Key fehlt."}
         try:
-            # Simple check call to models list
-            headers = {"Authorization": f"Bearer {self.groq_api_key}"}
-            resp = requests.get("https://api.groq.com/openai/v1/models", headers=headers, timeout=5)
+            # Simple check call to models list (OpenAI-compatible)
+            headers = {"Authorization": f"Bearer {self.llm_api_key}"}
+            resp = requests.get(f"{self.llm_base_url}/models", headers=headers, timeout=5)
             if resp.status_code == 200:
-                return {"ok": True, "msg": f"Groq Online: {self.groq_model}"}
-            return {"ok": False, "msg": f"Groq Error: {resp.status_code}"}
-        except:
-            return {"ok": False, "msg": "Groq API nicht erreichbar."}
+                provider_name = "Online" if "groq" in self.llm_base_url else "Custom Provider"
+                return {"ok": True, "msg": f"{provider_name}: {self.llm_model}"}
+            return {"ok": False, "msg": f"LLM Error: {resp.status_code}"}
+        except Exception as e:
+            return {"ok": False, "msg": f"Verbindungsfehler: {str(e)[:50]}"}
 
     def init_or_refresh_kb(self, utility: Optional[str] = None, reset: bool = False) -> int:
         utils = [utility] if utility else ALL_UTILITIES
-        if reset: self.vs.reset()
+        if reset: 
+            # Preserve metadata during reset to avoid startup deletion loop
+            old_meta = self.vs.col.metadata
+            self.vs.reset(metadata=old_meta)
         total = 0
         for util in utils:
             df = get_utility_df(util)
@@ -150,22 +158,22 @@ class EnergyRAG:
         return total
 
     def transcribe_audio(self, audio_bytes: bytes) -> Dict[str, Any]:
-        if not self.groq_api_key: return {"ok": False, "text": "Groq API Key fehlt."}
+        if not self.llm_api_key: return {"ok": False, "text": "API Key fehlt."}
         if not audio_bytes or len(audio_bytes) < 100:
             return {"ok": False, "text": "Audio-Daten zu kurz oder leer."}
             
         try:
-            headers = {"Authorization": f"Bearer {self.groq_api_key}"}
-            # Many browsers send WebM, Groq can handle it. We use a generic filename.
+            headers = {"Authorization": f"Bearer {self.llm_api_key}"}
             files = {
                 "file": ("audio.webm", io.BytesIO(audio_bytes), "audio/webm"),
-                "model": (None, "whisper-large-v3"),
+                "model": (None, os.getenv("WHISPER_MODEL", "whisper-large-v3")),
             }
-            resp = requests.post("https://api.groq.com/openai/v1/audio/transcriptions", headers=headers, files=files, timeout=30)
+            # Whisper endpoint is usually /audio/transcriptions
+            resp = requests.post(f"{self.llm_base_url}/audio/transcriptions", headers=headers, files=files, timeout=30)
             if resp.status_code == 200:
                 t = resp.json().get("text", "")
                 return {"ok": True, "text": t}
-            return {"ok": False, "text": f"Groq Error: {resp.status_code} - {resp.text}"}
+            return {"ok": False, "text": f"LLM Error: {resp.status_code} - {resp.text}"}
         except Exception as e:
             return {"ok": False, "text": f"Verbindungsfehler: {str(e)}"}
 
@@ -289,7 +297,7 @@ class EnergyRAG:
             ctx = "\n---\n".join([h["doc"] for h in hits])
             
             headers = {
-                "Authorization": f"Bearer {self.groq_api_key}",
+                "Authorization": f"Bearer {self.llm_api_key}",
                 "Content-Type": "application/json"
             }
 
@@ -315,7 +323,7 @@ class EnergyRAG:
                     }
                 ]
                 payload = {
-                    "model": self.groq_model,
+                    "model": self.llm_model,
                     "messages": [
                         {"role": "system", "content": (
                             "You are the ESC Agentic Assistant. You have FULL AUTHORITY to update the database. "
@@ -332,7 +340,7 @@ class EnergyRAG:
             else:
                 # --- FAST READ MODE: no tools, minimal tokens ---
                 payload = {
-                    "model": self.groq_model,
+                    "model": self.llm_model,
                     "messages": [
                         {"role": "system", "content": f"You are an infrastructure data expert. Answer concisely in the same language as the question. Context: {self.reference_manual[:500]}"},
                         {"role": "user", "content": f"Data:\n{ctx}\n\nQuestion: {question}"}
@@ -341,7 +349,7 @@ class EnergyRAG:
                     "max_tokens": 600
                 }
 
-            resp = requests.post(self.groq_url, headers=headers, json=payload, timeout=30)
+            resp = requests.post(f"{self.llm_base_url}/chat/completions", headers=headers, json=payload, timeout=30)
             if resp.status_code == 200:
                 choice = resp.json()["choices"][0]
                 msg = choice["message"]
@@ -353,12 +361,12 @@ class EnergyRAG:
                     return {
                         "answer": f"🤖 Update erkannt:\n- **Kunde:** `{args.get('customer_id')}`\n- **Feld:** `{args.get('field_name')}`\n- **Neuer Wert:** `{args.get('new_value')}`\n- **Sparte:** `{args.get('utility')}`",
                         "hits": hits,
-                        "model_used": self.groq_model,
+                        "model_used": self.llm_model,
                         "pending_action": {"type": "update_asset", "args": args}
                     }
 
                 answer = msg.get("content", "")
-                return {"answer": answer, "hits": hits, "model_used": self.groq_model, "switched": False}
+                return {"answer": answer, "hits": hits, "model_used": self.llm_model, "switched": False}
         except: pass
 
         if hits:

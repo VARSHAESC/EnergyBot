@@ -153,9 +153,10 @@ if "last_utility" not in st.session_state: st.session_state.last_utility = None
 if "target_tab" not in st.session_state: st.session_state.target_tab = None
 if "last_map_idx" not in st.session_state: st.session_state.last_map_idx = None
 if "selected_customer_id" not in st.session_state: st.session_state.selected_customer_id = None
+if "auto_kb_refreshed" not in st.session_state: st.session_state.auto_kb_refreshed = False
 
 # CRITICAL: If a target tab is set, override the logical and widget state BEFORE the UI renders
-if st.session_state.target_tab and st.session_state.target_tab in ["📉 Strategische Analyse", "🗺️ Netz-Karte", "🛡️ Compliance & Daten", "🤖 AI -Assistent"]:
+if st.session_state.target_tab and st.session_state.target_tab in ["📉 Strategische Analyse", "🗺️ Netz-Karte", "🛡️ Compliance & Daten", "🤖 KI -Assistent"]:
     st.session_state.active_tab = st.session_state.target_tab
     st.session_state.navigation_tab_widget = st.session_state.target_tab
     st.session_state.target_tab = None
@@ -304,7 +305,7 @@ with cols[3]:
     if st.button("Eignung prüfen", key="nav_infra", use_container_width=True): navigate_to("🗺️ Netz-Karte", "Unsuitable")
 
 # --- Tabs (Programmatic) ---
-tab_labels = ["📉 Strategische Analyse", "🗺️ Netz-Karte", "🛡️ Compliance & Daten", "🤖 AI -Assistent"]
+tab_labels = ["📉 Strategische Analyse", "🗺️ Netz-Karte", "🛡️ Compliance & Daten", "🤖 KI -Assistent"]
 
 # Inject CSS to style radio buttons to look like tabs
 st.markdown("""
@@ -607,7 +608,29 @@ elif active_tab == tab_labels[2]:
 
 elif active_tab == tab_labels[3]:
     with tab_container:
-        st.markdown("### 🤖 AI -Assistent")
+        st.markdown("### 🤖 KI -Assistent")
+        
+        # --- Automatic KB Refresh on Tab Entry ---
+        if engine.vs.count() == 0 and not st.session_state.get("kb_auto_tried", False):
+            st.session_state.kb_auto_tried = True
+            with st.status("🚀 KI-Assistent wird vorbereitet...", expanded=True) as status:
+                st.write("Lese Excel-Daten und indiziere KI-Speicher...")
+                # Force a hard reset of all caches
+                st.cache_data.clear()
+                st.cache_resource.clear()
+                invalidate_cache()
+                
+                # Re-instantiate engine to ensure everything is fresh
+                new_engine = get_engine()
+                count = new_engine.init_or_refresh_kb(reset=True)
+                
+                if count > 0:
+                    status.update(label=f"✅ {count} Datensätze erfolgreich indiziert!", state="complete")
+                    time.sleep(1) # Visual confirmation
+                    st.rerun()
+                else:
+                    status.update(label="⚠️ Keine Daten zur Indizierung gefunden.", state="error")
+                    st.warning("Bitte stellen Sie sicher, dass die Excel-Datei Daten enthält und nicht von einem anderen Programm blockiert wird.")
         
         col1, col2 = st.columns([2.5, 1.5])
         
@@ -642,7 +665,7 @@ elif active_tab == tab_labels[3]:
                 for q in suggested_queries:
                     if st.button(q, key=f"q_{q}", use_container_width=True):
                         st.session_state.history.append({"role": "user", "content": q})
-                        with st.spinner("AI analysiert strategische Daten..."):
+                        with st.spinner("KI analysiert strategische Daten..."):
                             res = engine.answer_question(q, utility=selected_utility if selected_utility != "Alle Sparten" else None)
                             st.session_state.history.append({"role": "bot", "content": res["answer"]})
                             st.session_state.speak_text = res["answer"]
@@ -771,7 +794,7 @@ elif active_tab == tab_labels[3]:
                         st.warning(f"⚠️ **Spracherkennung fehlgeschlagen:** {error_msg}")
                         st.info("💡 **Tipp:** Bitte nutzen Sie links 'KI-Speicher aktualisieren' falls der Fehler bleibt.")
 
-        if user_p := st.chat_input("Fragen Sie den AI-Assistenten nach Materialien, Risiken oder Objekt-Details..."):
+        if user_p := st.chat_input("Fragen Sie den KI-Assistenten nach Materialien, Risiken oder Objekt-Details..."):
             st.session_state.history.append({"role": "user", "content": user_p})
             with st.spinner("KI verarbeitet Anfrage..."):
                 res = engine.answer_question(user_p, utility=selected_utility if selected_utility != "Alle Sparten" else None)
