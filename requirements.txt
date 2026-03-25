@@ -14,3 +14,4 @@ gTTS
 folium
 streamlit-folium
 python-docx
+tabulate
