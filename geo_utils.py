@@ -173,40 +173,49 @@ def get_coordinates(row: pd.Series) -> tuple:
 
 def load_excel(path=EXCEL_FILE, header=0):
     if not os.path.exists(path): return pd.DataFrame()
-    return pd.read_excel(path, header=header)
+    df = pd.read_excel(path, header=header, engine="openpyxl")
+    df.columns = [c.strip() for c in df.columns]
+    return df
+
+def _has_actual_connection(row: dict, sparte: str) -> bool:
+    """True only if this property has an actual installation for the given utility."""
+    col = f"{sparte} Einbaudatum/ Fertigmeldung"
+    val = row.get(col)
+    return val is not None and str(val).strip() not in ("", "nan", "NaT", "None", "NaN")
+
 
 def get_utility_df(utility: str) -> pd.DataFrame:
     if not os.path.exists(EXCEL_FILE): return pd.DataFrame()
     try:
-        raw = pd.read_excel(EXCEL_FILE, header=0)
+        raw = pd.read_excel(EXCEL_FILE, header=0, engine="openpyxl")
     except: return pd.DataFrame()
-    
+
+    # Fix 2.1: strip trailing/leading whitespace from ALL column names
+    raw.columns = [c.strip() for c in raw.columns]
+
+    # Fix 2.4: drop permanently null columns
+    cols_to_drop = ["Zusatz"]
+    raw = raw.drop(columns=[c for c in cols_to_drop if c in raw.columns])
+
     # Identify utility-specific columns
     common_cols = []
     util_cols = []
     for c in raw.columns:
-        c_s = str(c).strip()
-        c_l = c_s.lower()
+        c_l = c.lower()
         if c_l.startswith(utility.lower()):
             util_cols.append(c)
         elif not any(c_l.startswith(u.lower()) for u in ALL_UTILITIES):
             common_cols.append(c)
-            
-    if not util_cols: return pd.DataFrame()
-    
-    df = raw[common_cols + util_cols].copy()
-    
-    # ── Filter rows where the customer has NO connection for this utility ──
-    # A row is excluded if ALL utility-specific columns are blank (NaN) or
-    # explicitly set to "NA" / "N/A" (case-insensitive).
-    def _is_na_value(v):
-        if pd.isna(v): return True
-        if isinstance(v, str) and v.strip().upper() in ("NA", "N/A", "N.A.", "-"): return True
-        return False
 
-    util_cols_in_df = [c for c in util_cols if c in df.columns]
-    has_connection = df[util_cols_in_df].apply(
-        lambda row: not all(_is_na_value(v) for v in row), axis=1
+    if not util_cols: return pd.DataFrame()
+
+    df = raw[common_cols + util_cols].copy()
+
+    # Fix 2.3: null-aware connection detection — only keep rows with an actual installation date
+    raw_dicts = raw.to_dict("records")
+    has_connection = pd.Series(
+        [_has_actual_connection(r, utility) for r in raw_dicts],
+        index=raw.index
     )
     df = df[has_connection].copy()
     if df.empty: return pd.DataFrame()
@@ -221,7 +230,7 @@ def get_utility_df(utility: str) -> pd.DataFrame:
         new_cols.append(c_clean)
     df.columns = new_cols
     
-    # Rename for consistency
+    # Rename for consistency (all column names already stripped of whitespace)
     renames = {
         "Kundenname": "Kundenname",
         "Kunden Name": "Kundenname",
@@ -230,7 +239,6 @@ def get_utility_df(utility: str) -> pd.DataFrame:
         "Objekt-ID": "Kundennummer",
         "Einbaudatum/ Fertigmeldung": "Einbaudatum",
         "Werkstoff Anschlussleitung": "Werkstoff",
-        "Werkstoff Anschlussleitung ": "Werkstoff",
         "Kabeltyp AL": "Werkstoff",
         "Dimension Anschlussleitung": "Dimension",
         "Querschnitt AL": "Dimension",
@@ -278,6 +286,13 @@ def get_utility_df(utility: str) -> pd.DataFrame:
     df["Erneuerung_empfohlen_bis"] = df.apply(lambda r: _erneuerung_jahr(r, utility), axis=1)
     df["Dokumente"] = df.apply(_docs_complete, axis=1)
     df["Infrastruktur_ungeeignet"] = df.apply(lambda r: _is_unsuitable_infrastructure(r, utility), axis=1)
+
+    # Fix 2.5: flag records missing their inspection date (critical compliance field)
+    def _missing_inspection(row: pd.Series) -> bool:
+        val = row.get("(Letztes) Inspektionsdatum")  # prefix stripped by rename loop above
+        return val is None or str(val).strip() in ("", "nan", "NaT", "None", "NaN")
+
+    df["missing_inspection"] = df.apply(_missing_inspection, axis=1)
     
     df = df.loc[:, ~df.columns.str.contains('^Unnamed')]
     return df
