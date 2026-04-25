@@ -720,7 +720,7 @@ def _safe(v: Any) -> str:
     return "" if pd.isna(v) else str(v)
 
 def row_to_paragraph(row: Dict[str, Any], utility: str = "") -> str:
-    general_keys = ["Gemeinde", "Postleitzahl", "Straße", "Hausnummer", "Zusatz", "Objekt-ID_Global"]
+    general_keys = ["Gemeinde", "Postleitzahl", "Straße", "Hausnummer", "Objekt-ID_Global"]
     util_specific = {k: v for k, v in row.items() if k not in general_keys and k != "Sparte"}
     parts = []
     if utility: parts.append(f"VERSORGUNGSART: {utility}")
