@@ -8,6 +8,7 @@ import json
 import pandas as pd
 import numpy as np
 from datetime import datetime
+from schema_map import normalise_columns, validate_required_columns
 
 # ── Paths ──────────────────────────────────────────────────────────────
 BASE_DIR = os.path.dirname(__file__)
@@ -174,7 +175,7 @@ def get_coordinates(row: pd.Series) -> tuple:
 def load_excel(path=EXCEL_FILE, header=0):
     if not os.path.exists(path): return pd.DataFrame()
     df = pd.read_excel(path, header=header, engine="openpyxl")
-    df.columns = [c.strip() for c in df.columns]
+    df = normalise_columns(df)
     return df
 
 def _has_actual_connection(row: dict, sparte: str) -> bool:
@@ -190,8 +191,8 @@ def get_utility_df(utility: str) -> pd.DataFrame:
         raw = pd.read_excel(EXCEL_FILE, header=0, engine="openpyxl")
     except: return pd.DataFrame()
 
-    # Fix 2.1: strip trailing/leading whitespace from ALL column names
-    raw.columns = [c.strip() for c in raw.columns]
+    # Fix 2.1 / 3.2: normalise column names (strips whitespace + maps variants to canonical names)
+    raw = normalise_columns(raw)
 
     # Fix 2.4: drop permanently null columns
     cols_to_drop = ["Zusatz"]
