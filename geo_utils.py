@@ -278,8 +278,14 @@ def get_utility_df(utility: str) -> pd.DataFrame:
         elif not any(c_l.startswith(u.lower()) for u in ALL_UTILITIES):
             common_cols.append(c)
 
-    if not util_cols:
-        # Fallback: If no specific utility columns, treat everything as General
+    # Check for a "Sparte" column first
+    sparte_col = next((c for c in raw_clean.columns if str(c).lower() in ["sparte", "medium", "typ"]), None)
+    
+    if sparte_col:
+        # Filter rows by the value in the "Sparte" column
+        df = raw_clean[raw_clean[sparte_col].astype(str).str.lower().str.contains(utility.lower())].copy()
+    elif not util_cols:
+        # Fallback: If no specific utility columns and no Sparte column, treat as General
         df = raw_clean.copy()
     else:
         df = raw_clean[common_cols + util_cols].copy()
