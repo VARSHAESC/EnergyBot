@@ -19,21 +19,20 @@ EXCEL_FILE = (
     else os.path.join(BASE_DIR, "data", "stadtwerke_synthetic_2300rows.xlsx")
 )
 # Legacy fallback: if the resolved path doesn't exist, try the old location or scan the mount
-if not os.path.exists(EXCEL_FILE):
     # Try the standard mount path
     _mount_dir = os.path.join(BASE_DIR, "excel_data")
     if os.path.exists(_mount_dir):
-        # Scan for any .xlsx file in the mount directory
-        xlsx_files = [f for f in os.listdir(_mount_dir) if f.endswith(".xlsx")]
-        if xlsx_files:
-            EXCEL_FILE = os.path.join(_mount_dir, xlsx_files[0])
-            print(f"DEBUG: Found data file in mount: {EXCEL_FILE}")
-    
-    # Final legacy check
-    if not os.path.exists(EXCEL_FILE):
-        _legacy = os.path.join(BASE_DIR, "excel_data", "Hausanschluss_data.xlsx")
-        if os.path.exists(_legacy):
-            EXCEL_FILE = _legacy
+        # 1. Prioritize the user's specific file name
+        _specific = os.path.join(_mount_dir, "Hausanschluss_data.xlsx")
+        if os.path.exists(_specific):
+            EXCEL_FILE = _specific
+        else:
+            # 2. Scan for any .xlsx file
+            xlsx_files = [f for f in os.listdir(_mount_dir) if f.endswith(".xlsx")]
+            if xlsx_files:
+                EXCEL_FILE = os.path.join(_mount_dir, xlsx_files[0])
+        
+        print(f"DEBUG: Selected data file: {EXCEL_FILE}")
 DEFAULT_EXCEL_PATH = EXCEL_FILE  # Alias for compatibility
 GEO_CACHE_FILE = os.path.join(BASE_DIR, "cache", "geo_cache.json")
 ALL_UTILITIES = ["Gas", "Wasser", "General"]
@@ -77,14 +76,25 @@ def _get_raw_data():
     
     # Cache miss or file changed
     try:
-        df = pd.read_excel(EXCEL_FILE, header=0, engine="openpyxl")
-        df = normalise_columns(df)
-        _invalidate_cache() # Clear downstream caches
+        # Load all sheets to find the one with the most data
+        xl = pd.ExcelFile(EXCEL_FILE, engine="openpyxl")
+        best_df = pd.DataFrame()
+        
+        for sheet in xl.sheet_names:
+            temp_df = pd.read_excel(xl, sheet_name=sheet, header=0)
+            if len(temp_df.columns) > len(best_df.columns):
+                best_df = temp_df
+            elif len(temp_df.columns) == len(best_df.columns) and len(temp_df) > len(best_df):
+                best_df = temp_df
+        
+        df = normalise_columns(best_df)
+        _invalidate_cache() 
         _DATA_CACHE["raw"] = df
         _DATA_CACHE["mtime"] = mtime
         _DATA_CACHE["last_check"] = current_time
         return df
-    except Exception:
+    except Exception as e:
+        print(f"ERROR: Failed to read Excel: {e}")
         return pd.DataFrame()
 
 MATERIAL_LIFESPAN = {
