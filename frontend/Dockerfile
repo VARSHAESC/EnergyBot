@@ -1,7 +1,7 @@
 # ── EnergyBot Frontend — React/Vite → Nginx ──────────────────────────────────
 
 # Stage 1: Build
-FROM node:20-alpine AS builder
+FROM node:22-alpine AS builder
 WORKDIR /app
 
 # Empty string = nginx proxies /api/ to the backend container (default for Docker).
