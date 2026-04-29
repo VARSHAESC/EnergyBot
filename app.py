@@ -620,7 +620,19 @@ def render_landing_page():
 with st.sidebar:
     st.image("https://img.icons8.com/isometric/100/factory.png", width=50)
     st.markdown("### System-Steuerung")
-    selected_utility = st.selectbox("Sparte auswählen", ["Alle Sparten"] + ALL_UTILITIES)
+    # Determine best default utility (first one with actual data)
+    best_default = "Alle Sparten"
+    for u in ALL_UTILITIES:
+        _, test_df = load_data_cached(u)
+        if not test_df.empty:
+            best_default = u
+            break
+            
+    selected_utility = st.selectbox(
+        "Sparte auswählen", 
+        ["Alle Sparten"] + ALL_UTILITIES,
+        index=(["Alle Sparten"] + ALL_UTILITIES).index(best_default)
+    )
     
     st.divider()
     if st.button("🏠 Zur Startseite", use_container_width=True):
