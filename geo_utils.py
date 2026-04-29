@@ -300,7 +300,10 @@ def get_utility_df(utility: str) -> pd.DataFrame:
     else:
         has_connection = pd.Series(False, index=raw.index)
 
-    df = df[has_connection].copy()
+    # Connection check: only filter if it's a specific utility with a known connection column
+    if utility != "General" and conn_col in raw.columns:
+        df = df[has_connection].copy()
+    
     if df.empty: return pd.DataFrame()
     
     # Cleaning column names
