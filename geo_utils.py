@@ -18,11 +18,22 @@ EXCEL_FILE = (
     if _env_data_file
     else os.path.join(BASE_DIR, "data", "stadtwerke_synthetic_2300rows.xlsx")
 )
-# Legacy fallback: if the resolved path doesn't exist, try the old location
+# Legacy fallback: if the resolved path doesn't exist, try the old location or scan the mount
 if not os.path.exists(EXCEL_FILE):
-    _legacy = os.path.join(BASE_DIR, "excel_data", "Hausanschluss_data.xlsx")
-    if os.path.exists(_legacy):
-        EXCEL_FILE = _legacy
+    # Try the standard mount path
+    _mount_dir = os.path.join(BASE_DIR, "excel_data")
+    if os.path.exists(_mount_dir):
+        # Scan for any .xlsx file in the mount directory
+        xlsx_files = [f for f in os.listdir(_mount_dir) if f.endswith(".xlsx")]
+        if xlsx_files:
+            EXCEL_FILE = os.path.join(_mount_dir, xlsx_files[0])
+            print(f"DEBUG: Found data file in mount: {EXCEL_FILE}")
+    
+    # Final legacy check
+    if not os.path.exists(EXCEL_FILE):
+        _legacy = os.path.join(BASE_DIR, "excel_data", "Hausanschluss_data.xlsx")
+        if os.path.exists(_legacy):
+            EXCEL_FILE = _legacy
 DEFAULT_EXCEL_PATH = EXCEL_FILE  # Alias for compatibility
 GEO_CACHE_FILE = os.path.join(BASE_DIR, "cache", "geo_cache.json")
 ALL_UTILITIES = ["Gas", "Wasser"]
