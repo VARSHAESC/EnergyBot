@@ -36,7 +36,7 @@ if not os.path.exists(EXCEL_FILE):
             EXCEL_FILE = _legacy
 DEFAULT_EXCEL_PATH = EXCEL_FILE  # Alias for compatibility
 GEO_CACHE_FILE = os.path.join(BASE_DIR, "cache", "geo_cache.json")
-ALL_UTILITIES = ["Gas", "Wasser"]
+ALL_UTILITIES = ["Gas", "Wasser", "General"]
 CSV_FILES = {u: EXCEL_FILE for u in ALL_UTILITIES}
 
 import time
@@ -278,9 +278,11 @@ def get_utility_df(utility: str) -> pd.DataFrame:
         elif not any(c_l.startswith(u.lower()) for u in ALL_UTILITIES):
             common_cols.append(c)
 
-    if not util_cols: return pd.DataFrame()
-
-    df = raw_clean[common_cols + util_cols].copy()
+    if not util_cols:
+        # Fallback: If no specific utility columns, treat everything as General
+        df = raw_clean.copy()
+    else:
+        df = raw_clean[common_cols + util_cols].copy()
 
     # Optimized connection detection (Vectorized)
     conn_col = f"{utility} Einbaudatum/ Fertigmeldung"

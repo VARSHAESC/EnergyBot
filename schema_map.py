@@ -13,7 +13,7 @@ import pandas as pd
 # Maps canonical_name -> list of possible raw column names (in priority order)
 COLUMN_MAP = {
     # Identity
-    "Kundenname":           ["Kundenname", "Kunden"],
+    "Kundenname":           ["Kundenname", "Kunden", "Name"],
     "Gemeinde":             ["Gemeinde"],
     "Postleitzahl":         ["Postleitzahl"],
     "Straße":               ["Straße", "Strasse", "Strae"],
