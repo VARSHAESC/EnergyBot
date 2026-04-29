@@ -1,0 +1,84 @@
+/* ── Shimmer animation ───────────────────────────────────────────────────────── */
+@keyframes skel-shimmer {
+    0%   { background-position: -200% 0; }
+    100% { background-position:  200% 0; }
+}
+
+.skel-bone {
+    display: block;
+    background: linear-gradient(
+        90deg,
+        rgba(255, 255, 255, 0.04) 25%,
+        rgba(255, 255, 255, 0.11) 50%,
+        rgba(255, 255, 255, 0.04) 75%
+    );
+    background-size: 200% 100%;
+    animation: skel-shimmer 1.5s ease-in-out infinite;
+    flex-shrink: 0;
+}
+
+[data-theme="light"] .skel-bone {
+    background: linear-gradient(
+        90deg,
+        rgba(0, 0, 0, 0.05) 25%,
+        rgba(0, 0, 0, 0.13) 50%,
+        rgba(0, 0, 0, 0.05) 75%
+    );
+    background-size: 200% 100%;
+    animation: skel-shimmer 1.5s ease-in-out infinite;
+}
+
+/* ── Skeleton containers are non-interactive ─────────────────────────────────── */
+.skel-card {
+    pointer-events: none;
+    user-select: none;
+    cursor: default !important;
+}
+
+/* ── Table skeleton rows ─────────────────────────────────────────────────────── */
+.skel-tr td {
+    padding: 12px 16px;
+}
+
+/* ── Home KPI skeleton card ──────────────────────────────────────────────────── */
+.skel-home-card {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    pointer-events: none;
+    user-select: none;
+}
+
+/* ── Analysis skeleton ───────────────────────────────────────────────────────── */
+.skel-analysis {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.skel-chart-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+}
+
+.skel-chart-card {
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.skel-table-card {
+    padding: 25px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+/* ── Explorer loading overlay ────────────────────────────────────────────────── */
+.skel-map-bar {
+    display: flex;
+    gap: 8px;
+    padding: 8px 0;
+}

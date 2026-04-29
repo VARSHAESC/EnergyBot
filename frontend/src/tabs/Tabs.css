@@ -141,3 +141,34 @@
   flex-direction: column;
   height: 600px;
 }
+
+/* New Utility Block Styles */
+.utility-analysis-block {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--glass-border);
+}
+
+.utility-analysis-block:last-child {
+  border-bottom: none;
+}
+
+.utility-block-title {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--text-main);
+  margin-top: 10px;
+  border-left: 3px solid #3b82f6; /* Default to blue, or use a primary color */
+  padding-left: 12px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.no-data-hint {
+  padding: 40px;
+  text-align: center;
+  color: var(--text-muted);
+  font-style: italic;
+}

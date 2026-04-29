@@ -1,0 +1,35 @@
+name: Build and Push to ACR
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Azure Login
+      uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    - name: ACR Login
+      run: |
+        az acr login --name energybotprod
+
+    - name: Build and Push Backend
+      run: |
+        docker build -t energybotprod.azurecr.io/backend:${{ github.sha }} -t energybotprod.azurecr.io/backend:latest .
+        docker push energybotprod.azurecr.io/backend:${{ github.sha }}
+        docker push energybotprod.azurecr.io/backend:latest
+
+    - name: Build and Push Frontend
+      run: |
+        cd frontend
+        docker build -t energybotprod.azurecr.io/frontend:${{ github.sha }} -t energybotprod.azurecr.io/frontend:latest .
+        docker push energybotprod.azurecr.io/frontend:${{ github.sha }}
+        docker push energybotprod.azurecr.io/frontend:latest

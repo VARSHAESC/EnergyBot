@@ -9,14 +9,16 @@ services:
       dockerfile: Dockerfile
     container_name: energybot_backend
     ports:
-      - "8000:8000"
+      - "8000:8000"        # kept for direct API access during development
     env_file:
       - .env
     volumes:
       - ./excel_data:/app/excel_data    # live data — never rebuilt into image
-      - ./cache:/app/cache
-      - ./chroma_db:/app/chroma_db
+      - energybot_cache:/app/cache
+      - energybot_chroma:/app/chroma_db
     restart: unless-stopped
+    networks:
+      - energybot
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
       interval: 30s
@@ -24,11 +26,13 @@ services:
       retries: 3
       start_period: 60s
 
-  # ── React / Vite frontend ────────────────────────────────────────────────────
+  # ── React / Vite frontend (served by nginx) ─────────────────────────────────
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: ""   # empty = nginx proxies /api/ to backend service
     container_name: energybot_frontend
     ports:
       - "3000:80"
@@ -36,3 +40,13 @@ services:
       backend:
         condition: service_healthy
     restart: unless-stopped
+    networks:
+      - energybot
+
+networks:
+  energybot:
+    driver: bridge
+
+volumes:
+  energybot_cache:
+  energybot_chroma:

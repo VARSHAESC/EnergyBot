@@ -6,10 +6,12 @@ import {
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { useApp } from '../context/AppContext';
+import { useLanguage } from '../context/LanguageContext';
 import MarkerClusterGroup from 'react-leaflet-cluster';
 import 'leaflet.markercluster/dist/MarkerCluster.css';
 import 'leaflet.markercluster/dist/MarkerCluster.Default.css';
 import StreetView3D from '../components/3d/StreetView3D';
+import { API_BASE } from '../lib/api';
 import './NetworkMap.css';
 
 /* ─── House-shaped marker icons ──────────────────────────────────────────────── */
@@ -157,20 +159,33 @@ function applyFilter(assets, filterConfig) {
 }
 
 /* ─── Risk badge component ───────────────────────────────────────────────────── */
-function RiskBadge({ risk }) {
+function RiskBadge({ risk, t }) {
     const cls   = { Hoch: 'high', Mittel: 'medium', Niedrig: 'low' }[risk] || 'unknown';
-    const label = { Hoch: '⚠ High', Mittel: '◈ Medium', Niedrig: '✓ Low' }[risk] || risk;
+    const label = {
+        Hoch: `⚠ ${t('mapExplorer.riskLabels.high')}`,
+        Mittel: `◈ ${t('mapExplorer.riskLabels.medium')}`,
+        Niedrig: `✓ ${t('mapExplorer.riskLabels.low')}`
+    }[risk] || risk;
     return <span className={`nm-risk-badge ${cls}`}>{label}</span>;
 }
+
+/* ─── Module-level caches ────────────────────────────────────────────────────── */
+
+// GeoJSON never changes — cache permanently for the session
+let _geoCache = null;
+
+// Assets keyed by utility — cache per session
+const _assetCache = {};
 
 /* ═══════════════════════════════════════════════════════════════════════════════
    MAIN COMPONENT
    ═══════════════════════════════════════════════════════════════════════════════ */
 export default function NetworkMap({ filterConfig }) {
     const { activeUtility, selectedAsset, setSelectedAsset } = useApp();
-    const [geoData,         setGeoData]        = useState(null);
+    const { t, lang } = useLanguage();
+    const [geoData,         setGeoData]        = useState(_geoCache);
     const [mapFocus,        setMapFocus]        = useState(null);
-    const [assets,          setAssets]          = useState([]);
+    const [assets,          setAssets]          = useState(() => _assetCache[activeUtility] || []);
     const [viewMode,        setViewMode]        = useState('2D');
     const [hoveredAsset,    setHoveredAsset]    = useState(null);
     const [routedPipelines, setRoutedPipelines] = useState({ gas: [], water: [] });
@@ -180,12 +195,28 @@ export default function NetworkMap({ filterConfig }) {
             setMapFocus([selectedAsset.lat, selectedAsset.lon]);
     }, [selectedAsset]);
 
+    // GeoJSON: fetch once per session, then serve from cache
     useEffect(() => {
+        if (_geoCache) { setGeoData(_geoCache); return; }
         fetch('/data/utility_networks.geojson')
-            .then(r => r.json()).then(setGeoData)
+            .then(r => r.json())
+            .then(d => { _geoCache = d; setGeoData(d); })
             .catch(e => console.error('GeoJSON:', e));
-        fetch(`http://localhost:8000/api/assets?utility=${activeUtility}`)
-            .then(r => r.json()).then(d => setAssets(d.records || []))
+    }, []);
+
+    // Assets: serve from cache instantly, fetch only on first visit per utility
+    useEffect(() => {
+        if (_assetCache[activeUtility]) {
+            setAssets(_assetCache[activeUtility]);
+            return;
+        }
+        fetch(`${API_BASE}/api/assets?utility=${activeUtility}`)
+            .then(r => r.json())
+            .then(d => {
+                const records = d.records || [];
+                _assetCache[activeUtility] = records;
+                setAssets(records);
+            })
             .catch(e => console.error('Assets:', e));
     }, [activeUtility]);
 
@@ -235,16 +266,16 @@ export default function NetworkMap({ filterConfig }) {
                         <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
                             <path d="M1 2h10M3 6h6M5 10h2" stroke="#fbbf24" strokeWidth="1.5" strokeLinecap="round"/>
                         </svg>
-                        {filterConfig.label ?? 'Filtered View'}
+                        {filterConfig.labelKey ? t(filterConfig.labelKey) : (filterConfig.label ?? 'Filtered View')}
                     </span>
-                    <span className="nm-filter-count">{visibleAssets.length} Connections</span>
+                    <span className="nm-filter-count">{visibleAssets.length} {t('pages.anschluesse.breadcrumb')}</span>
                 </div>
             )}
 
             <div className="nm-topbar">
                 <div className="nm-title">
                     <div className="nm-title-dot" />
-                    <span>NETWORK — {activeUtility.toUpperCase()}</span>
+                    <span>{t('mapExplorer.title').toUpperCase()} — {activeUtility.toUpperCase()}</span>
                 </div>
 
                 <div className="nm-focus-info">
@@ -264,7 +295,7 @@ export default function NetworkMap({ filterConfig }) {
                                 <path d="M1 5.5H11M5.5 1V10" stroke="#64748b" strokeWidth="1.2" strokeLinecap="round"/>
                             </svg>
                             <span>Wülfrath Overview</span>
-                            {!filterConfig && <span>— {assets.length} connections loaded</span>}
+                            {!filterConfig && <span>— {assets.length} {t('common.totalConnections').toLowerCase()}</span>}
                         </>
                     )}
                 </div>
@@ -294,7 +325,7 @@ export default function NetworkMap({ filterConfig }) {
                                     <path d="M6 2a4 4 0 1 0 4 4" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
                                     <path d="M10 2v4h-4" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
                                 </svg>
-                                Overview
+                                {t('nav.overview')}
                             </button>
                         </>
                     ) : (
@@ -318,9 +349,9 @@ export default function NetworkMap({ filterConfig }) {
                             {selectedAsset['Straße']} {selectedAsset.Hausnummer}
                         </div>
                         {[
-                            ['Utility',  selectedAsset.Sparte],
-                            ['Material', selectedAsset.Werkstoff || '—'],
-                            ['Age',      selectedAsset.Alter ? `${selectedAsset.Alter} yrs.` : '—'],
+                            [t('mapExplorer.details.utility'),  selectedAsset.Sparte],
+                            [t('mapExplorer.details.material'), selectedAsset.Werkstoff || '—'],
+                            [t('mapExplorer.details.age'),      selectedAsset.Alter ? `${selectedAsset.Alter} yrs.` : '—'],
                         ].map(([k, v]) => (
                             <div className="nm-asset-row" key={k}>
                                 <span className="nm-asset-key">{k}</span>
@@ -328,8 +359,8 @@ export default function NetworkMap({ filterConfig }) {
                             </div>
                         ))}
                         <div className="nm-asset-row">
-                            <span className="nm-asset-key">Risk</span>
-                            <RiskBadge risk={selectedAsset.Risiko} />
+                            <span className="nm-asset-key">{t('mapExplorer.details.risk')}</span>
+                            <RiskBadge risk={selectedAsset.Risiko} t={t} />
                         </div>
                     </div>
                 )}
@@ -339,17 +370,17 @@ export default function NetworkMap({ filterConfig }) {
                         <div className="nm-stat-pill">
                             <div className="nm-stat-dot nm-stat-dot--gas" />
                             <strong>{assets.filter(a => a.Sparte === 'Gas').length}</strong>
-                            <span>Gas</span>
+                            <span>{t('sidebar.gas')}</span>
                         </div>
                         <div className="nm-stat-pill">
                             <div className="nm-stat-dot nm-stat-dot--water" />
                             <strong>{assets.filter(a => a.Sparte !== 'Gas').length}</strong>
-                            <span>Water</span>
+                            <span>{t('sidebar.water')}</span>
                         </div>
                         <div className="nm-stat-pill">
                             <div className="nm-stat-dot nm-stat-dot--risk" />
                             <strong>{assets.filter(a => a.Risiko === 'Hoch').length}</strong>
-                            <span>High Risk</span>
+                            <span>{t('common.highRisk')}</span>
                         </div>
                     </div>
                 )}
@@ -358,36 +389,36 @@ export default function NetworkMap({ filterConfig }) {
                     <div className="nm-legend-title">Legend</div>
                     <div className="nm-legend-row">
                         <div className="nm-legend-line nm-legend-line--gas" />
-                        <span>Gas Main Line</span>
+                        <span>{t('mapExplorer.legend.gasPipeline')}</span>
                     </div>
                     <div className="nm-legend-row">
                         <div className="nm-legend-line nm-legend-line--water" />
-                        <span>Water Main Line</span>
+                        <span>{t('mapExplorer.legend.waterPipeline')}</span>
                     </div>
                     <div className="nm-legend-divider" />
                     <div className="nm-legend-row">
                         <svg width="13" height="16" viewBox="0 0 20 26" fill="none" className="nm-legend-house">
                             <path d="M10 1.5L19.5 9.5V25H13V17H7V25H0.5V9.5L10 1.5Z" fill="#ef4444" stroke="rgba(255,255,255,0.6)" strokeWidth="1.5" strokeLinejoin="round"/>
                         </svg>
-                        <span>High Risk</span>
+                        <span>{t('common.highRisk')}</span>
                     </div>
                     <div className="nm-legend-row">
                         <svg width="13" height="16" viewBox="0 0 20 26" fill="none" className="nm-legend-house">
                             <path d="M10 1.5L19.5 9.5V25H13V17H7V25H0.5V9.5L10 1.5Z" fill="#f97316" stroke="rgba(255,255,255,0.6)" strokeWidth="1.5" strokeLinejoin="round"/>
                         </svg>
-                        <span>Medium Risk</span>
+                        <span>{t('common.mediumRisk')}</span>
                     </div>
                     <div className="nm-legend-row">
                         <svg width="13" height="16" viewBox="0 0 20 26" fill="none" className="nm-legend-house">
                             <path d="M10 1.5L19.5 9.5V25H13V17H7V25H0.5V9.5L10 1.5Z" fill="#eab308" stroke="rgba(255,255,255,0.6)" strokeWidth="1.5" strokeLinejoin="round"/>
                         </svg>
-                        <span>Gas Connection</span>
+                        <span>{t('mapExplorer.legend.gasConnection')}</span>
                     </div>
                     <div className="nm-legend-row">
                         <svg width="13" height="16" viewBox="0 0 20 26" fill="none" className="nm-legend-house">
                             <path d="M10 1.5L19.5 9.5V25H13V17H7V25H0.5V9.5L10 1.5Z" fill="#3b82f6" stroke="rgba(255,255,255,0.6)" strokeWidth="1.5" strokeLinejoin="round"/>
                         </svg>
-                        <span>Water Connection</span>
+                        <span>{t('mapExplorer.legend.waterConnection')}</span>
                     </div>
                 </div>
 

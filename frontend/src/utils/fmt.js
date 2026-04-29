@@ -12,8 +12,8 @@ export function fmtPct(v) {
     return `${Math.round(Number(v))}%`;
 }
 
-/** Format an age value as "N J" (Jahre / years). */
-export function fmtAge(v, unit = 'J') {
+/** Format an age value as "N Jahre" (Jahre / years). */
+export function fmtAge(v, unit = 'Jahre') {
     if (v == null) return '—';
     return `${Math.round(Number(v))} ${unit}`;
 }

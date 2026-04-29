@@ -11,7 +11,8 @@ const AnschlussePage = lazy(() => import('./pages/AnschlussePage'));
 const KritischPage = lazy(() => import('./pages/KritischPage'));
 const UeberNutzungsdauerPage = lazy(() => import('./pages/UeberNutzungsdauerPage'));
 const ModernisierungPage = lazy(() => import('./pages/ModernisierungPage'));
-const MapExplorerPage = lazy(() => import('./pages/MapExplorerPage'));
+const MapExplorerPage     = lazy(() => import('./pages/MapExplorerPage'));
+const AiIntelligencePage  = lazy(() => import('./pages/AiIntelligencePage'));
 
 function App() {
   const { isAuthenticated } = useApp();
@@ -47,7 +48,8 @@ function App() {
           <Route path="kritisch" element={<KritischPage />} />
           <Route path="ueber-nutzungsdauer" element={<UeberNutzungsdauerPage />} />
           <Route path="modernisierung" element={<ModernisierungPage />} />
-          <Route path="map-explorer" element={<MapExplorerPage />} />
+          <Route path="map-explorer"    element={<MapExplorerPage />} />
+          <Route path="ai-intelligence" element={<AiIntelligencePage />} />
         </Route>
       </Routes>
     </Suspense>

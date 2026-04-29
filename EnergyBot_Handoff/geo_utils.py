@@ -2,107 +2,42 @@
 """
 geo_utils.py — Data loader and geospatial utilities.
 """
+
 import os
 import re
 import json
 import pandas as pd
 import numpy as np
 from datetime import datetime
-from schema_map import normalise_columns, validate_required_columns
 
 # ── Paths ──────────────────────────────────────────────────────────────
 BASE_DIR = os.path.dirname(__file__)
-_env_data_file = os.environ.get("DATA_FILE", "")
-EXCEL_FILE = (
-    os.path.join(BASE_DIR, _env_data_file)
-    if _env_data_file
-    else os.path.join(BASE_DIR, "data", "stadtwerke_synthetic_2300rows.xlsx")
-)
-# Legacy fallback: if the resolved path doesn't exist, try the old location
-if not os.path.exists(EXCEL_FILE):
-    _legacy = os.path.join(BASE_DIR, "excel_data", "Hausanschluss_data.xlsx")
-    if os.path.exists(_legacy):
-        EXCEL_FILE = _legacy
-DEFAULT_EXCEL_PATH = EXCEL_FILE  # Alias for compatibility
+EXCEL_FILE = os.path.join(BASE_DIR, "excel_data", "Hausanschluss_data.xlsx")
+DEFAULT_EXCEL_PATH = EXCEL_FILE # Alias for compatibility
 GEO_CACHE_FILE = os.path.join(BASE_DIR, "cache", "geo_cache.json")
 ALL_UTILITIES = ["Gas", "Wasser"]
 CSV_FILES = {u: EXCEL_FILE for u in ALL_UTILITIES}
-
-import time
-
-# ── Performance Cache ──────────────────────────────────────────────────
-_DATA_CACHE = {
-    "raw": None,
-    "mtime": 0,
-    "last_check": 0,
-    "utilities": {},
-    "unified": None,
-    "kpis": {}
-}
-CACHE_TTL = 300  # 5 minutes
-
-def _invalidate_cache():
-    global _DATA_CACHE
-    _DATA_CACHE["raw"] = None
-    _DATA_CACHE["utilities"].clear()
-    _DATA_CACHE["unified"] = None
-    _DATA_CACHE["kpis"].clear()
-
-def _get_raw_data():
-    global _DATA_CACHE
-    if not os.path.exists(EXCEL_FILE):
-        return pd.DataFrame()
-    
-    current_time = time.time()
-    
-    # Check TTL to avoid hammering the disk with os.path.getmtime
-    if _DATA_CACHE["raw"] is not None and (current_time - _DATA_CACHE["last_check"] < CACHE_TTL):
-        return _DATA_CACHE["raw"]
-        
-    mtime = os.path.getmtime(EXCEL_FILE)
-    if _DATA_CACHE["raw"] is not None and _DATA_CACHE["mtime"] == mtime:
-        _DATA_CACHE["last_check"] = current_time
-        return _DATA_CACHE["raw"]
-    
-    # Cache miss or file changed
-    try:
-        df = pd.read_excel(EXCEL_FILE, header=0, engine="openpyxl")
-        df = normalise_columns(df)
-        _invalidate_cache() # Clear downstream caches
-        _DATA_CACHE["raw"] = df
-        _DATA_CACHE["mtime"] = mtime
-        _DATA_CACHE["last_check"] = current_time
-        return df
-    except Exception:
-        return pd.DataFrame()
 
 MATERIAL_LIFESPAN = {
     "PE-HD": 50, "PE": 50, "PE100": 50, "PVC": 40,
     "Kupfer": 60, "Stahl": 65, "Grauguss": 80, "Duktilguss": 80,
     "Gusseisen": 80, "Kunststoff": 40, "HDPE": 50,
-    "AL": 45, "Kabel": 45, "NYY": 45
 }
 
 RISK_LADDER = {
     "Gas": [
-        {"material": "Stahl mit KKS", "gut": 59, "mittel": 95, "life": 80},
-        {"material": "Stahl ohne KKS", "gut": 51, "mittel": 83, "life": 70},
-        {"material": "PE", "gut": 55, "mittel": 89, "life": 75},
-        # Fallback for generic 'Stahl' in Gas
-        {"material": "Stahl", "gut": 51, "mittel": 83, "life": 70}, 
+        {"material": "Stahl mit KKS",   "gut": 59, "mittel": 95,  "life": 80},
+        {"material": "Stahl ohne KKS",  "gut": 51, "mittel": 83,  "life": 70},
+        {"material": "Stahl",           "gut": 51, "mittel": 83,  "life": 70}, # Fallback for plain 'Stahl'
+        {"material": "PE",              "gut": 55, "mittel": 89,  "life": 75},
     ],
     "Wasser": [
         {"material": "Asbestzement-(AZ)", "gut": 36, "mittel": 59, "life": 50},
-        {"material": "AZ", "gut": 36, "mittel": 59, "life": 50},
-        {"material": "Asbest", "gut": 36, "mittel": 59, "life": 50},
-        {"material": "PE", "gut": 62, "mittel": 101, "life": 85},
-        {"material": "PVC", "gut": 36, "mittel": 59, "life": 50},
-        {"material": "Stahl", "gut": 44, "mittel": 71, "life": 60},
-    ],
-    "Strom": [
-        {"material": "Kabel", "gut": 35, "mittel": 50, "life": 45},
-        {"material": "AL", "gut": 35, "mittel": 50, "life": 45},
-        {"material": "NYY", "gut": 35, "mittel": 50, "life": 45},
+        {"material": "Asbest",            "gut": 36, "mittel": 59, "life": 50}, # Alias
+        {"material": "AZ",                "gut": 36, "mittel": 59, "life": 50}, # Alias
+        {"material": "PE",                "gut": 62, "mittel": 101,"life": 85},
+        {"material": "PVC",               "gut": 36, "mittel": 59, "life": 50},
+        {"material": "Stahl",             "gut": 44, "mittel": 71, "life": 60},
     ]
 }
 
@@ -117,30 +52,10 @@ def _get_risk_profile(sparte: str, material: str):
 CURRENT_YEAR = datetime.now().year
 
 def _fix_encoding(s: str) -> str:
-    """Clean up strings from Excel artifacts aggressively using unicode escapes."""
+    """Clean up strings from Excel artifacts."""
     if not isinstance(s, str): return str(s)
-    
-    # Standardize most common artifacts
-    s = s.replace('\ufffd', 'ü') # Default fallback
-    
-    # Specific German fixes
-    replacements = {
-        'Stra' + chr(0xfffd) + 'e': 'Straße',
-        'Strae': 'Straße',
-        'Strasse': 'Straße',
-        'Gre': 'Größe',
-        'Gr' + chr(0xfffd) + 'e': 'Größe',
-        'Lngengrad': 'Längengrad',
-        'L' + chr(0xfffd) + 'ndengrad': 'Längengrad',
-        'Kundenname': 'Kundenname'
-    }
-    for old, new in replacements.items():
-        s = s.replace(old, new)
-        
-    # Standardize remaining fallback artifacts
-    s = s.replace('\ufffd', 'ü')
-    s = s.replace('Strae', 'Straße')
-    
+    s = s.replace('\ufffd', 'ü').replace('\u00fc', 'ü')
+    s = s.replace('\u00e4', 'ä').replace('\u00f6', 'ö').replace('\u00df', 'ß')
     s = s.replace('\x00', '')
     s = re.sub(r'\s+', ' ', s).strip()
     return s
@@ -231,56 +146,42 @@ def get_coordinates(row: pd.Series) -> tuple:
     return None, None
 
 def load_excel(path=EXCEL_FILE, header=0):
-    if path == EXCEL_FILE:
-        return _get_raw_data()
     if not os.path.exists(path): return pd.DataFrame()
-    df = pd.read_excel(path, header=header, engine="openpyxl")
-    df = normalise_columns(df)
-    return df
-
-def _has_actual_connection(row: dict, sparte: str) -> bool:
-    """True only if this property has an actual installation for the given utility."""
-    col = f"{sparte} Einbaudatum/ Fertigmeldung"
-    val = row.get(col)
-    return val is not None and str(val).strip() not in ("", "nan", "NaT", "None", "NaN")
-
+    return pd.read_excel(path, header=header)
 
 def get_utility_df(utility: str) -> pd.DataFrame:
-    global _DATA_CACHE
-    raw = _get_raw_data()
-    if raw.empty: return pd.DataFrame()
-
-    if utility in _DATA_CACHE["utilities"]:
-        return _DATA_CACHE["utilities"][utility]
-
-    # Fix 2.4: drop permanently null columns
-    cols_to_drop = ["Zusatz"]
-    raw_clean = raw.drop(columns=[c for c in cols_to_drop if c in raw.columns])
-
+    if not os.path.exists(EXCEL_FILE): return pd.DataFrame()
+    try:
+        raw = pd.read_excel(EXCEL_FILE, header=0)
+    except: return pd.DataFrame()
+    
     # Identify utility-specific columns
     common_cols = []
     util_cols = []
-    for c in raw_clean.columns:
-        c_l = str(c).lower()
+    for c in raw.columns:
+        c_s = str(c).strip()
+        c_l = c_s.lower()
         if c_l.startswith(utility.lower()):
             util_cols.append(c)
         elif not any(c_l.startswith(u.lower()) for u in ALL_UTILITIES):
             common_cols.append(c)
-
+            
     if not util_cols: return pd.DataFrame()
+    
+    df = raw[common_cols + util_cols].copy()
+    
+    # ── Filter rows where the customer has NO connection for this utility ──
+    # A row is excluded if ALL utility-specific columns are blank (NaN) or
+    # explicitly set to "NA" / "N/A" (case-insensitive).
+    def _is_na_value(v):
+        if pd.isna(v): return True
+        if isinstance(v, str) and v.strip().upper() in ("NA", "N/A", "N.A.", "-"): return True
+        return False
 
-    df = raw_clean[common_cols + util_cols].copy()
-
-    # Optimized connection detection (Vectorized)
-    conn_col = f"{utility} Einbaudatum/ Fertigmeldung"
-    if conn_col in raw.columns:
-        # Treat various null-like strings as actual NaTs
-        has_connection = raw[conn_col].astype(str).str.strip().replace(
-            ["", "nan", "NaT", "None", "NaN", "0"], pd.NA
-        ).notna()
-    else:
-        has_connection = pd.Series(False, index=raw.index)
-
+    util_cols_in_df = [c for c in util_cols if c in df.columns]
+    has_connection = df[util_cols_in_df].apply(
+        lambda row: not all(_is_na_value(v) for v in row), axis=1
+    )
     df = df[has_connection].copy()
     if df.empty: return pd.DataFrame()
     
@@ -294,20 +195,19 @@ def get_utility_df(utility: str) -> pd.DataFrame:
         new_cols.append(c_clean)
     df.columns = new_cols
     
-    # Rename for consistency (all column names already stripped of whitespace)
+    # Rename for consistency
     renames = {
         "Kundenname": "Kundenname",
         "Kunden Name": "Kundenname",
-        "Kunden": "Kundenname",
         "Objekt-ID (Nummer bspw.)": "Kundennummer",
         "Objekt-ID": "Kundennummer",
         "Einbaudatum/ Fertigmeldung": "Einbaudatum",
         "Werkstoff Anschlussleitung": "Werkstoff",
-        "Kabeltyp AL": "Werkstoff",
+        "Werkstoff Anschlussleitung ": "Werkstoff",
+
         "Dimension Anschlussleitung": "Dimension",
         "Querschnitt AL": "Dimension",
-        "Querschnitt AL (mm²)": "Dimension",
-        "Strae": "Straße", "Strasse": "Straße", "Straße": "Straße",
+        "Strae": "Straße", "Strasse": "Straße",
         "Anschlusslänge Hausanschluss": "Länge",
         "Länge Anschlussleitung": "Länge",
     }
@@ -330,23 +230,10 @@ def get_utility_df(utility: str) -> pd.DataFrame:
     
     df["Sparte"] = utility
     
-    # Extract coordinates.
-    # normalise_columns() may have already renamed Breitengrad (Latitude) → lat.
-    # If so, use those values directly; get_coordinates() would return None because
-    # it searches for "Latitude" in the column name which no longer exists.
-    if "lat" in df.columns and "lon" in df.columns and df["lat"].notna().any():
-        df["lat"] = pd.to_numeric(df["lat"], errors="coerce")
-        df["lon"] = pd.to_numeric(df["lon"], errors="coerce")
-    else:
-        coords = df.apply(get_coordinates, axis=1)
-        df["lat"] = coords.apply(lambda x: x[0])
-        df["lon"] = coords.apply(lambda x: x[1])
-
-    # ── Final Cleaning ──
-    # Clean all string values in the dataframe to handle encoding artifacts
-    for col in df.columns:
-        if df[col].dtype == 'object':
-            df[col] = df[col].apply(lambda x: _fix_encoding(x) if isinstance(x, str) else x)
+    # Extract coordinates
+    coords = df.apply(get_coordinates, axis=1)
+    df["lat"] = coords.apply(lambda x: x[0])
+    df["lon"] = coords.apply(lambda x: x[1])
 
     if "Einbaudatum" in df.columns:
         df["Einbaudatum"] = df["Einbaudatum"].apply(_parse_date)
@@ -357,32 +244,20 @@ def get_utility_df(utility: str) -> pd.DataFrame:
     df["Erneuerung_empfohlen_bis"] = df.apply(lambda r: _erneuerung_jahr(r, utility), axis=1)
     df["Dokumente"] = df.apply(_docs_complete, axis=1)
     df["Infrastruktur_ungeeignet"] = df.apply(lambda r: _is_unsuitable_infrastructure(r, utility), axis=1)
-
-    # Fix 2.5: flag records missing their inspection date (critical compliance field)
-    def _missing_inspection(row: pd.Series) -> bool:
-        val = row.get("(Letztes) Inspektionsdatum")  # prefix stripped by rename loop above
-        return val is None or str(val).strip() in ("", "nan", "NaT", "None", "NaN")
-
-    df["missing_inspection"] = df.apply(_missing_inspection, axis=1)
     
+    # Ensure key display columns are strings to prevent ArrowTypeError in Streamlit
+    for col in ["Hausnummer", "Kundennummer", "Straße"]:
+        if col in df.columns:
+            df[col] = df[col].astype(str).replace("nan", "")
+
     df = df.loc[:, ~df.columns.str.contains('^Unnamed')]
-    
-    # Store in cache
-    _DATA_CACHE["utilities"][utility] = df
     return df
 
 def get_unified_df() -> pd.DataFrame:
-    global _DATA_CACHE
-    if _DATA_CACHE["unified"] is not None:
-        return _DATA_CACHE["unified"]
-        
     dfs = [get_utility_df(u) for u in ALL_UTILITIES]
     valid_dfs = [d for d in dfs if not d.empty]
     if not valid_dfs: return pd.DataFrame()
-    
-    unified = pd.concat(valid_dfs, ignore_index=True)
-    _DATA_CACHE["unified"] = unified
-    return unified
+    return pd.concat(valid_dfs, ignore_index=True)
 
 def kpi_advanced(df: pd.DataFrame) -> dict:
     if df.empty: return {k: 0 for k in ["total", "critical", "aging_30", "aging_40", "renewal_soon", "unsuitable", "over_lifespan"]}
@@ -420,6 +295,27 @@ def invalidate_cache():
 # ── Dynamic GeoJSON Regeneration ─────────────────────────────────────────
 GEOJSON_FILE = os.path.join(BASE_DIR, "excel_data", "utility_networks.geojson")
 
+OSRM_AVAILABLE = None
+
+def check_osrm_available():
+    global OSRM_AVAILABLE
+    if OSRM_AVAILABLE is not None:
+        return OSRM_AVAILABLE
+    import os, requests
+    base_url = os.environ.get("OSRM_BASE_URL", "http://localhost:5000")
+    try:
+        requests.get(f"{base_url}/route/v1/driving/0,0;0,0", timeout=1)
+        OSRM_AVAILABLE = True
+    except Exception:
+        # Auto-fallback for local Python vs Docker routing (e.g. env says osrm:5000 but we are outside docker)
+        try:
+            requests.get("http://localhost:5000/route/v1/driving/0,0;0,0", timeout=1)
+            os.environ["OSRM_BASE_URL"] = "http://localhost:5000"
+            OSRM_AVAILABLE = True
+        except Exception:
+            OSRM_AVAILABLE = False
+    return OSRM_AVAILABLE
+
 # Entry stations (supply points) for the network topology
 _STATIONS = {
     "Stadtnetz": [
@@ -440,9 +336,14 @@ def is_geojson_stale() -> bool:
     return os.path.getmtime(EXCEL_FILE) > os.path.getmtime(GEOJSON_FILE)
 
 def _osrm_route(p1, p2):
+    if not check_osrm_available():
+        return [p1, p2]
+    
     import requests, time as _time
+    import os
+    base_url = os.environ.get("OSRM_BASE_URL", "http://localhost:5000")
     coords = f"{p1[0]},{p1[1]};{p2[0]},{p2[1]}"
-    url = (f"http://router.project-osrm.org/route/v1/driving/{coords}"
+    url = (f"{base_url}/route/v1/driving/{coords}"
            f"?overview=full&geometries=geojson")
     try:
         for _ in range(2):
@@ -452,7 +353,7 @@ def _osrm_route(p1, p2):
                 if d.get("code") == "Ok":
                     return d["routes"][0]["geometry"]["coordinates"]
             _time.sleep(0.5)
-    except Exception:
+    except Exception as e:
         pass
     return [p1, p2]   # straight-line fallback
 
@@ -489,147 +390,182 @@ def _offset_polyline(coords, offset_dist):
     return out
 
 def _osrm_nearest_best(house_pt):
-    """
-    Find the best junction point on the road for a house by checking
-    multiple nearby road segments and picking the one that is truly 'in front'.
-    """
+    if not check_osrm_available():
+        return house_pt
+        
     import requests
-    # Get top 5 nearest road waypoints to increase chance of finding the parallel street
-    url = f"http://router.project-osrm.org/nearest/v1/driving/{house_pt[0]},{house_pt[1]}?number=10"
+    import os
+    base_url = os.environ.get("OSRM_BASE_URL", "http://localhost:5000")
+    url = f"{base_url}/nearest/v1/driving/{house_pt[0]},{house_pt[1]}?number=10"
     try:
         r = requests.get(url, timeout=3)
         if r.status_code == 200:
             d = r.json()
             if d.get("code") == "Ok":
-                # Find the one that is geographically closest to being perpendicular
-                # We pick the point that is simply the closest to the house
-                # OSRM's 'nearest' already sorts by distance, but we want to make sure
-                # we don't pick a point that is 'closer' but on a different road or behind houses.
-                # Actually, the first result is usually the closest.
-                # The issue before was that OSRM snapped to a junction.
-                # Let's try to pick a point that isn't a junction if possible, or just the best one.
                 return d["waypoints"][0]["location"]
-    except: pass
+    except Exception as e:
+        pass
     return house_pt
 
 def _features_for_utility(utility: str) -> list:
     """
-    Build GeoJSON features using a refined Star Topology.
-    Strategy: 
-    1. Route from each house to its nearest supply station via OSRM.
-    2. Project the house onto ALL segments of the road route to find the 
-       geographically closest junction point on the street.
-    3. Ensure all features have 6 keys for Folium compatibility.
+    Build GeoJSON features using a GIS Street Topology.
+    1. Group customers by 'Straße'.
+    2. Main Pipe: geometric route between the two farthest houses on that street.
+    3. Lateral: straight line from each house to its perpendicular projection on the Main Pipe.
     """
     df = get_utility_df(utility)
     if df.empty: return []
     df = df.dropna(subset=["lat", "lon"]).copy()
     if df.empty: return []
 
-    all_stations = []
-    for zone, s_list in _STATIONS.items():
-        for s in s_list:
-            all_stations.append({**s, "zone": zone})
-
-    OFFSET = {"Gas": -0.000035, "Wasser": 0.0, "Strom": 0.000035}
+    OFFSET = {"Gas": -0.000035, "Wasser": 0.0}
     offset = OFFSET.get(utility, 0)
-    DIM_MAIN, DIM_LAT = ({"Gas":"DN 150","Wasser":"DN 150","Strom":"110kV"}, {"Gas":"DN 40","Wasser":"DN 32","Strom":"400V"})
-    MAT_MAIN, MAT_LAT = ({"Gas":"PE-HD","Wasser":"GG","Strom":"Kabel"}, {"Gas":"PE-HD","Wasser":"PE","Strom":"NYY-J"})
+    DIM_MAIN, DIM_LAT = ({"Gas":"DN 150","Wasser":"DN 150"}, {"Gas":"DN 40","Wasser":"DN 32"})
+    MAT_MAIN, MAT_LAT = ({"Gas":"PE-HD","Wasser":"GG"}, {"Gas":"PE-HD","Wasser":"PE"})
 
     features = []
 
-    def project_point_to_line(pt, v, w):
-        v, w, pt = np.array(v), np.array(w), np.array(pt)
-        l2 = np.sum((w-v)**2)
-        if l2 == 0: return v.tolist()
-        t = max(0, min(1, np.dot(pt-v, w-v)/l2))
-        return (v + t*(w-v)).tolist()
+    # Removing old project_point_to_line; its logic is embedded directly now to access segment limits
 
-    for _, row in df.iterrows():
-        h_lat, h_lon = float(row["lat"]), float(row["lon"])
-        risk = str(row.get("Risiko", "Unbekannt"))
-        house_pt = [h_lon, h_lat]
+    if "Straße" not in df.columns:
+        df["Straße"] = "Unbekannt"
 
-        # ── 1. Nearest Station ────────────────────────────────────────
-        nearest = min(all_stations, key=lambda s: (h_lat-s["lat"])**2 + (h_lon-s["lon"])**2)
-        station_pt = [nearest["lon"], nearest["lat"]]
-        zone = nearest["zone"]
+    grouped = df.groupby("Straße")
 
-        # ── 2. Route via OSRM ─────────────────────────────────────────
-        road_route = _osrm_route(station_pt, house_pt)
-        if offset != 0: road_route = _offset_polyline(road_route, offset)
+    for street_name, group in grouped:
+        pts = group[["lon", "lat"]].values.tolist()
+        if len(pts) == 0: continue
 
-        # ── 3. Find Absolute Best Junction (90 deg) ───────────────────
-        # We project the house onto EVERY segment of the road route
-        best_dist = float('inf')
-        best_snap = road_route[-1]
-        best_idx  = len(road_route) - 2
+        main_coords = []
+        if len(pts) == 1:
+            house_pt = pts[0]
+            best_snap = _osrm_nearest_best(house_pt)
+            main_coords = [best_snap, best_snap]
+        else:
+            # Find the two extremeties
+            arr = np.array(pts)
+            from scipy.spatial.distance import pdist, squareform
+            dist_matrix = squareform(pdist(arr))
+            i, j = np.unravel_index(np.argmax(dist_matrix, axis=None), dist_matrix.shape)
+            p1, p2 = pts[i], pts[j]
+            road_route = _osrm_route(p1, p2)
+            if offset != 0: road_route = _offset_polyline(road_route, offset)
+            main_coords = road_route
 
-        if len(road_route) >= 2:
-            for i in range(len(road_route)-1):
-                proj = project_point_to_line(house_pt, road_route[i], road_route[i+1])
-                d = (house_pt[0]-proj[0])**2 + (house_pt[1]-proj[1])**2
-                if d < best_dist:
-                    best_dist = d
-                    best_snap = proj
-                    best_idx = i
-        
-        main_coords = road_route[:best_idx+1] + [best_snap]
-        
-        # Offset the house point as well so the entire lateral is separated
-        # We use a MUCH smaller shift at the house (10%) to keep it on the same building
-        # while keeping the full offset at the street side.
-        house_offset = offset * 0.1
-        final_house_pt = [house_pt[0] + house_offset, house_pt[1] + house_offset]
-        lateral_coords = [best_snap, final_house_pt]
-
-        # Extract pipe length if available
-        p_length = row.get("Länge", 0)
-        try:
-            # Handle potential non-numeric values
-            p_length = float(str(p_length).replace(",", ".")) if pd.notna(p_length) else 0
-        except:
-            p_length = 0
-
-        # ── 4. Build Features ─────────────────────────────────────────
-        # All features MUST have these 6 keys to avoid Folium Tooltip crashes
         base = {
-            "utility": utility, 
-            "network": zone, 
-            "risiko": risk,
+            "utility": utility,
+            "network": "Stadtnetz", # Defaulting to Stadtnetz
+            "risiko": "N/A",
             "material": "N/A",
             "dimension": "N/A"
         }
         
-        # Main pipe
+        # Track boundary extrapolations if house projections exceed current main pipe
+        extrapolate_start_t = 0.0
+        extrapolate_end_t = 1.0
+        
+        street_features = []
+
+        for _, row in group.iterrows():
+            h_lat, h_lon = float(row["lat"]), float(row["lon"])
+            house_pt = [h_lon, h_lat]
+            risk = str(row.get("Risiko", "Unbekannt"))
+            p_length = row.get("Länge", 0)
+            try:
+                p_length = float(str(p_length).replace(",", ".")) if pd.notna(p_length) else 0
+            except:
+                p_length = 0
+
+            best_dist = float('inf')
+            best_snap = main_coords[0] if len(main_coords) > 0 else house_pt
+            best_snap_idx = 0
+            best_snap_t = 0.0
+
+            if len(main_coords) >= 2:
+                for idx in range(len(main_coords)-1):
+                    v, w = main_coords[idx], main_coords[idx+1]
+                    v_arr, w_arr, pt_arr = np.array(v), np.array(w), np.array(house_pt)
+                    l2 = np.sum((w_arr-v_arr)**2)
+                    
+                    if l2 == 0:
+                        proj = v
+                        t = 0.0
+                    else:
+                        t = np.dot(pt_arr-v_arr, w_arr-v_arr)/l2
+                        
+                        # Only allow extrapolation logic at the first/last physical street segments
+                        if idx == 0 and idx == len(main_coords)-2:
+                                pass # single segment, allow t < 0 and t > 1
+                        elif idx == 0:
+                            t = min(1.0, t) # allow bounds extension backwards (t < 0)
+                        elif idx == len(main_coords)-2:
+                            t = max(0.0, t) # allow bounds extension forwards (t > 1)
+                        else:
+                            t = max(0.0, min(1.0, t)) # strictly inner segment
+                            
+                        proj = (v_arr + t*(w_arr-v_arr)).tolist()
+                        
+                    d = (house_pt[0]-proj[0])**2 + (house_pt[1]-proj[1])**2
+                    if d < best_dist:
+                        best_dist = d
+                        best_snap = proj
+                        best_snap_idx = idx
+                        best_snap_t = t
+
+            # Record max required extrapolations for the main pipe bounds
+            if len(main_coords) >= 2:
+                if best_snap_idx == 0 and best_snap_t < 0:
+                    extrapolate_start_t = min(extrapolate_start_t, best_snap_t)
+                if best_snap_idx == len(main_coords)-2 and best_snap_t > 1:
+                    extrapolate_end_t = max(extrapolate_end_t, best_snap_t)
+
+            house_offset = offset * 0.1
+            final_house_pt = [house_pt[0] + house_offset, house_pt[1] + house_offset]
+            lateral_coords = [best_snap, final_house_pt]
+
+            lat_prop = base.copy()
+            lat_prop.update({
+                "risiko": risk,
+                "type": "Lateral",
+                "material": MAT_LAT.get(utility, "n/a"),
+                "dimension": DIM_LAT.get(utility, "n/a"),
+                "length": f"{p_length:.1f} m" if p_length > 0 else "n/a"
+            })
+            
+            # Connect the nodes visibly
+            conn_prop = base.copy()
+            conn_prop.update({
+                "type": "Connection Node",
+                "risiko": risk
+            })
+            
+            street_features.append({"type":"Feature", "properties":lat_prop, "geometry":{"type":"LineString", "coordinates":lateral_coords}})
+            street_features.append({"type":"Feature", "properties":conn_prop, "geometry":{"type":"Point", "coordinates":best_snap}})
+
+        # Now effectively extend the main pipe ends dynamically if houses were out of physical street bounds
+        if len(main_coords) >= 2:
+            if extrapolate_start_t < 0:
+                v_arr, w_arr = np.array(main_coords[0]), np.array(main_coords[1])
+                main_coords[0] = (v_arr + extrapolate_start_t*(w_arr-v_arr)).tolist()
+                
+            if extrapolate_end_t > 1:
+                v_arr, w_arr = np.array(main_coords[-2]), np.array(main_coords[-1])
+                main_coords[-1] = (v_arr + extrapolate_end_t*(w_arr-v_arr)).tolist()
+
+        # Main pipe feature assembled after the loop
         mp = base.copy()
         mp.update({
-            "type": "Main Pipe", 
-            "material": MAT_MAIN.get(utility, "N/A"), 
+            "type": "Main Pipe",
+            "material": MAT_MAIN.get(utility, "N/A"),
             "dimension": DIM_MAIN.get(utility, "N/A"),
-            "risiko": "N/A"
+            "risiko": "N/A",
+            "street": str(street_name)
         })
         features.append({"type":"Feature", "properties":mp, "geometry":{"type":"LineString", "coordinates":main_coords}})
-        base = {
-            "utility": utility, 
-            "network": zone, 
-            "risiko": risk,
-            "type": "Lateral",
-            "material": MAT_LAT.get(utility, "n/a"),
-            "dimension": DIM_LAT.get(utility, "n/a"),
-            "length": f"{p_length:.1f} m" if p_length > 0 else "n/a"
-        }
-        features.append({"type":"Feature", "properties":base, "geometry":{"type":"LineString", "coordinates":lateral_coords}})
         
-        # Connection Node
-        cn = base.copy()
-        cn.update({"type": "Connection Node", "material":"N/A", "dimension":"N/A"})
-        features.append({"type":"Feature", "properties":cn, "geometry":{"type":"Point", "coordinates":best_snap}})
-        
-        # House Node
-        hn = base.copy()
-        hn.update({"type": "Node", "material":"N/A", "dimension":"N/A"})
-        features.append({"type":"Feature", "properties":hn, "geometry":{"type":"Point", "coordinates":final_house_pt}})
+        # Add the computed child features into the collection
+        features.extend(street_features)
 
     return features
 

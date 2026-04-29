@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom';
-import { Home, Map, Sun, Moon } from 'lucide-react';
+import { Home, Map, Bot, Sun, Moon } from 'lucide-react';
 import { useLanguage } from '../../context/LanguageContext';
 import { useTheme } from '../../context/ThemeContext';
 import './TopNav.css';
@@ -13,7 +13,8 @@ export default function TopNav() {
         { path: '/dashboard/kritisch',          labelKey: 'nav.critical' },
         { path: '/dashboard/ueber-nutzungsdauer', labelKey: 'nav.renewalDue' },
         { path: '/dashboard/modernisierung',    labelKey: 'nav.modernization' },
-        { path: '/dashboard/map-explorer',      labelKey: 'nav.mapExplorer', icon: Map },
+        { path: '/dashboard/map-explorer',      labelKey: 'nav.mapExplorer',    icon: Map },
+        { path: '/dashboard/ai-intelligence',  labelKey: 'nav.aiIntelligence', icon: Bot },
     ];
 
     return (

@@ -5,7 +5,7 @@ import './Dashboard.css';
 
 export default function Dashboard() {
     const { pathname } = useLocation();
-    const fullBleed    = pathname.includes('map-explorer');
+    const fullBleed    = pathname.includes('map-explorer') || pathname.includes('ai-intelligence');
 
     return (
         <div className="dashboard-layout">

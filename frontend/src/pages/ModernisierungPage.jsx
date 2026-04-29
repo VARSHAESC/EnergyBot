@@ -9,15 +9,15 @@ import { ShieldAlert } from 'lucide-react';
 import './SubPage.css';
 
 export default function ModernisierungPage() {
-    const { kpis, detailedKpis, activeUtility } = useApp();
+    const { kpis, detailedKpis, kpisLoading, activeUtility } = useApp();
     const { t } = useLanguage();
-    const [activeTab, setActiveTab] = useState('map');
-    const [mapFilter, setMapFilter] = useState(null);
+    const [activeTab, setActiveTab] = useState('chat');
+    // const [mapFilter, setMapFilter] = useState(null); // reserved for future map restore
     const d = detailedKpis?.modernisierung;
     const p = 'pages.modernisierung';
 
     const tabs = [
-        { id: 'map', label: t('tabs.networkMap') },
+        // { id: 'map', label: t('tabs.networkMap') }, // hidden — restore when ready
         { id: 'chat', label: t('tabs.aiAssistant') },
     ];
 
@@ -25,10 +25,7 @@ export default function ModernisierungPage() {
     const showGas = activeUtility !== 'Wasser';
     const primaryValue = d?.critical_material ?? kpis?.modernization_issues;
 
-    const goToMap = (filter) => {
-        setMapFilter(filter);
-        setActiveTab('map');
-    };
+    // const goToMap = (filter) => { setMapFilter(filter); setActiveTab('map'); }; // reserved
 
     const kpiItems = [
         {
@@ -36,21 +33,18 @@ export default function ModernisierungPage() {
             value: fmtNum(primaryValue),
             sub: t(`${p}.kpis.critMat.sub`),
             accent: '#ef4444', glow: 'danger',
-            onClick: () => goToMap({ label: 'Critical Materials' }),
         },
         showWasser && {
             label: t(`${p}.kpis.az.label`),
             value: fmtNum(d?.az_leitungen),
             sub: t(`${p}.kpis.az.sub`),
             accent: '#ef4444', glow: 'danger',
-            onClick: () => goToMap({ sparte: 'Wasser', label: 'Asbestos Pipes' }),
         },
         showGas && {
             label: t(`${p}.kpis.stahl.label`),
             value: fmtNum(d?.stahl_ohne_kks),
             sub: t(`${p}.kpis.stahl.sub`),
             accent: '#ef4444', glow: 'danger',
-            onClick: () => goToMap({ sparte: 'Gas', label: 'Steel w/o Protection' }),
         },
         showWasser && {
             label: t(`${p}.kpis.schutzrohr.label`),
@@ -68,9 +62,9 @@ export default function ModernisierungPage() {
 
     const renderContent = () => {
         switch (activeTab) {
-            case 'map': return <NetworkMap filterConfig={mapFilter} />;
+            // case 'map': return <NetworkMap filterConfig={mapFilter} />; // hidden — restore when ready
             case 'chat': return <AiAssistant />;
-            default: return <NetworkMap filterConfig={mapFilter} />;
+            default: return <AiAssistant />;
         }
     };
 
@@ -92,7 +86,7 @@ export default function ModernisierungPage() {
                 </div>
             </div>
 
-            <PageKpiGrid items={kpiItems} />
+            <PageKpiGrid items={kpiItems} loading={kpisLoading} count={4} />
 
             <div className="tab-container glass-card">
                 <div className="tab-navigation">
@@ -102,7 +96,7 @@ export default function ModernisierungPage() {
                         </button>
                     ))}
                 </div>
-                <div className={`tab-content${activeTab === 'map' ? ' tab-content--map' : ''}`}>{renderContent()}</div>
+                <div className="tab-content">{renderContent()}</div>
             </div>
         </div>
     );

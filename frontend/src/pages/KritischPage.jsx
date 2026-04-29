@@ -10,15 +10,15 @@ import { AlertTriangle } from 'lucide-react';
 import './SubPage.css';
 
 export default function KritischPage() {
-    const { kpis, detailedKpis, activeUtility } = useApp();
+    const { kpis, detailedKpis, kpisLoading, activeUtility } = useApp();
     const { t } = useLanguage();
-    const [activeTab, setActiveTab] = useState('map');
-    const [mapFilter, setMapFilter] = useState(null);
+    const [activeTab, setActiveTab] = useState('analysis');
+    // const [mapFilter, setMapFilter] = useState(null); // reserved for future map restore
     const d = detailedKpis?.kritisch;
     const p = 'pages.kritisch';
 
     const tabs = [
-        { id: 'map',      label: t('tabs.networkMap') },
+        // { id: 'map', label: t('tabs.networkMap') }, // hidden — restore when ready
         { id: 'analysis', label: t('tabs.strategicAnalysis') },
         { id: 'chat',     label: t('tabs.aiAssistant') },
     ];
@@ -27,10 +27,7 @@ export default function KritischPage() {
     const showGas    = activeUtility !== 'Wasser';
     const primaryValue = d?.hoch_risiko ?? kpis?.critical;
 
-    const goToMap = (filter) => {
-        setMapFilter(filter);
-        setActiveTab('map');
-    };
+    // const goToMap = (filter) => { setMapFilter(filter); setActiveTab('map'); }; // reserved
 
     const kpiItems = [
         {
@@ -38,14 +35,12 @@ export default function KritischPage() {
             value: fmtNum(primaryValue),
             sub: `${fmtPct(d?.high_risk_pct)} ${t(`${p}.kpis.hoch.sub`)}`,
             accent: '#ef4444', glow: 'danger',
-            onClick: () => goToMap({ risiko: 'Hoch', label: 'High Risk' }),
         },
         {
             label: t(`${p}.kpis.overdue.label`),
             value: fmtNum(d?.inspection_overdue),
             sub: t(`${p}.kpis.overdue.sub`),
             accent: '#ef4444', glow: 'danger',
-            onClick: () => goToMap({ label: 'Inspection Overdue' }),
         },
         showWasser && {
             label: t(`${p}.kpis.overdueWasser.label`),
@@ -64,23 +59,21 @@ export default function KritischPage() {
             value: fmtNum(d?.wasser_kritisch),
             sub: t(`${p}.kpis.wKritisch.sub`),
             glow: 'danger',
-            onClick: () => goToMap({ risiko: 'Hoch', sparte: 'Wasser', label: 'Water – High Risk' }),
         },
         showGas && {
             label: t(`${p}.kpis.gKritisch.label`),
             value: fmtNum(d?.gas_kritisch),
             sub: t(`${p}.kpis.gKritisch.sub`),
             glow: 'danger',
-            onClick: () => goToMap({ risiko: 'Hoch', sparte: 'Gas', label: 'Gas – High Risk' }),
         },
     ].filter(Boolean);
 
     const renderContent = () => {
         switch (activeTab) {
-            case 'map':      return <NetworkMap filterConfig={mapFilter} />;
+            // case 'map': return <NetworkMap filterConfig={mapFilter} />; // hidden — restore when ready
             case 'analysis': return <StrategicAnalysis />;
             case 'chat':     return <AiAssistant />;
-            default:         return <NetworkMap filterConfig={mapFilter} />;
+            default:         return <StrategicAnalysis />;
         }
     };
 
@@ -102,7 +95,7 @@ export default function KritischPage() {
                 </div>
             </div>
 
-            <PageKpiGrid items={kpiItems} />
+            <PageKpiGrid items={kpiItems} loading={kpisLoading} count={4} />
 
             <div className="tab-container glass-card">
                 <div className="tab-navigation">
@@ -112,7 +105,7 @@ export default function KritischPage() {
                         </button>
                     ))}
                 </div>
-                <div className={`tab-content${activeTab === 'map' ? ' tab-content--map' : ''}`}>{renderContent()}</div>
+                <div className="tab-content">{renderContent()}</div>
             </div>
         </div>
     );

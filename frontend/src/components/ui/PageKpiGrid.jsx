@@ -1,11 +1,22 @@
+import { SkeletonKpiCard } from './Skeleton';
 import './PageKpiGrid.css';
 
 /**
- * items: { label, value, sub?, accent?, glow?, onClick? }
- *   glow: 'danger' | 'warning' | 'info'  — adds pulsing glow border
- *   onClick: () => void                   — makes card clickable (redirects to map)
+ * items:   { label, value, sub?, accent?, glow?, onClick? }
+ * loading: show skeleton cards instead of real data
+ * count:   number of skeleton cards to show (defaults to items.length or 4)
  */
-export default function PageKpiGrid({ items = [] }) {
+export default function PageKpiGrid({ items = [], loading = false, count }) {
+    const colCount = count ?? Math.min(items.length || 4, 4);
+
+    if (loading || (!items.length && loading !== false)) {
+        return (
+            <div className="pkpi-grid" style={{ '--col-count': colCount }}>
+                {Array.from({ length: colCount }, (_, i) => <SkeletonKpiCard key={i} />)}
+            </div>
+        );
+    }
+
     if (!items.length) return null;
 
     return (
@@ -13,8 +24,8 @@ export default function PageKpiGrid({ items = [] }) {
             {items.map((item, i) => {
                 const cls = [
                     'pkpi-card',
-                    item.glow ? `pkpi-glow-${item.glow}` : '',
-                    item.onClick ? 'pkpi-clickable' : '',
+                    item.glow   ? `pkpi-glow-${item.glow}` : '',
+                    item.onClick ? 'pkpi-clickable'          : '',
                 ].filter(Boolean).join(' ');
 
                 return (

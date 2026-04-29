@@ -1,0 +1,31 @@
+name: energybot-offline
+services:
+  app:
+    build: .
+    image: energybot_offline:latest
+    container_name: energybot_offline
+    ports:
+      - "8600:8501"
+    env_file:
+      - .env
+    environment:
+      - OSRM_BASE_URL=http://osrm:5000
+    volumes:
+      - ./excel_data:/app/excel_data
+      - ./cache:/app/cache
+      - ./chroma_db:/app/chroma_db
+      - ./app.py:/app/app.py
+      - ./rag_engine.py:/app/rag_engine.py
+      - ./geo_utils.py:/app/geo_utils.py
+      - ./pages:/app/pages
+    restart: unless-stopped
+
+  osrm:
+    image: osrm/osrm-backend
+    container_name: osrm_backend
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./osrm_data:/data
+    command: "osrm-routed --algorithm mld /data/duesseldorf-regbez-latest.osrm"

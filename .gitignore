@@ -1,4 +1,6 @@
 .env
+excel_data/
+hf_cache/
 __pycache__/
 *.pyc
 cache/

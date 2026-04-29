@@ -13,9 +13,13 @@ venv/
 frontend/node_modules/
 frontend/dist/
 
-# Data volumes — mounted at runtime via compose.yaml, not baked in
+# Data volumes — populated at runtime via named volumes in compose.yaml
 cache/
 chroma_db/
+
+# Logs
+*.log
+app.log
 
 # Dev / scratch files
 scratch/
@@ -31,5 +35,6 @@ temp_client_data/
 .vscode/
 .idea/
 
-# Secrets — injected via env_file in compose.yaml, never in image
+# Secrets — injected via env_file in compose.yaml, never baked into image
 .env
+.env.template

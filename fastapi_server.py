@@ -1,31 +1,59 @@
+# -*- coding: utf-8 -*-
 import os
-import re as _re
 import logging
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
-from typing import List, Optional, Dict, Any
-from fastapi.middleware.cors import CORSMiddleware
 import time
 import pandas as pd
+
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import StreamingResponse
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from typing import List, Optional, Dict, Any
 
 from logging_config import setup_logging
 setup_logging()
 logger = logging.getLogger(__name__)
 
-# Handle imports safely to avoid crashing if dependencies are missing during init
+# -------------------------------------------------------------
+# SAFE IMPORTS
+# -------------------------------------------------------------
+try:
+    from geo_utils import (
+        get_utility_df,
+        get_unified_df,
+        kpi_advanced,
+        ALL_UTILITIES,
+        load_excel,
+        EXCEL_FILE,
+        _invalidate_cache
+    )
+except Exception as e:
+    logger.error("geo_utils import failed: %s", e)
+    get_utility_df = None
+    get_unified_df = None
+    kpi_advanced = None
+    load_excel = None
+    EXCEL_FILE = None
+    ALL_UTILITIES = []
+    _invalidate_cache = None
+
 try:
     from rag_engine import EnergyRAG
-    from geo_utils import get_utility_df, get_unified_df, kpi_advanced, ALL_UTILITIES, load_excel
 except Exception as e:
-    logger.error("Core imports failed: %s", e)
+    logger.error("EnergyRAG import failed: %s", e)
     EnergyRAG = None
-    get_unified_df = None
 
-app = FastAPI(title="STADTWERKE X API", description="Production API for the EnergyBot Intelligence Platform")
+# -------------------------------------------------------------
+# FASTAPI APP
+# -------------------------------------------------------------
+app = FastAPI(
+    title="STADTWERKE X API",
+    description="Production API for the EnergyBot Intelligence Platform"
+)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Production: Restrict to frontend domain
+    allow_origins=["*"],  # restrict in production
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -33,33 +61,84 @@ app.add_middleware(
 
 engine = None
 
+# -------------------------------------------------------------
+# MODELS
+# -------------------------------------------------------------
+class UpdateRequest(BaseModel):
+    customer_id: str
+    field_name: str
+    new_value: str
+    utility: str
+
+class ChatRequest(BaseModel):
+    query: str
+    utility: Optional[str] = None
+    history: Optional[List[Dict[str, Any]]] = []
+
+# -------------------------------------------------------------
+# KPI CACHE
+# -------------------------------------------------------------
+_KPI_CACHE = {
+    "kpis": {},
+    "detailed_kpis": {},
+    "mtime": 0,
+    "last_check": 0
+}
+
+CACHE_TTL = 300
+
+def _check_kpi_cache():
+    global _KPI_CACHE
+    current_time = time.time()
+
+    if current_time - _KPI_CACHE["last_check"] < CACHE_TTL:
+        return
+
+    if EXCEL_FILE and os.path.exists(EXCEL_FILE):
+        mtime = os.path.getmtime(EXCEL_FILE)
+        if mtime != _KPI_CACHE["mtime"]:
+            _KPI_CACHE["kpis"].clear()
+            _KPI_CACHE["detailed_kpis"].clear()
+            _KPI_CACHE["mtime"] = mtime
+
+    _KPI_CACHE["last_check"] = current_time
+
+# -------------------------------------------------------------
+# STARTUP
+# -------------------------------------------------------------
 @app.on_event("startup")
 def startup_event():
     global engine
-    logger.info("Stadtwerke X Intelligence Platform starting...")
+
+    logger.info("Starting EnergyBot Platform...")
+
+    try:
+        if get_unified_df:
+            get_unified_df()
+            if load_excel:
+                load_excel()
+    except Exception as e:
+        logger.warning(f"Cache warmup failed: {e}")
+
     if EnergyRAG:
         try:
-            logger.info("Initializing EnergyRAG Engine...")
             engine = EnergyRAG()
-            logger.info("Engine initialized successfully.")
+            logger.info("RAG Engine initialized")
         except Exception as e:
-            logger.error("Failed to initialize Engine: %s", e)
+            logger.error("Engine init failed: %s", e)
 
-@app.get("/api/health")
-def health_check():
-    """System health check and LLM status validation"""
-    if not engine:
-        return {"status": "backend_degraded", "llm_available": False}
-    status = engine.check_llm_status()["msg"]
-    kb_count = engine.vs.count() if hasattr(engine, 'vs') else 0
-    logger.info("API Health Check - KB Count: %d", kb_count)
-    return {"status": "ok", "llm": status, "kb_count": kb_count}
-
+# -------------------------------------------------------------
+# KPI ENDPOINTS (VECTORIZED & CACHED)
+# -------------------------------------------------------------
 @app.get("/api/kpis")
 def get_kpis(utility: str = "Alle Sparten"):
     """Fetch global KPIs for the dashboard"""
     if not get_unified_df:
         raise HTTPException(status_code=500, detail="Data utilities not loaded.")
+        
+    _check_kpi_cache()
+    if utility in _KPI_CACHE["kpis"]:
+        return _KPI_CACHE["kpis"][utility]
         
     df = get_unified_df() if utility == "Alle Sparten" else get_utility_df(utility)
     if df.empty:
@@ -67,6 +146,8 @@ def get_kpis(utility: str = "Alle Sparten"):
     
     kpis = kpi_advanced(df)
     sanitized_kpis = {k: float(v) if isinstance(v, (int, float)) else v for k, v in kpis.items()}
+    
+    _KPI_CACHE["kpis"][utility] = sanitized_kpis
     return sanitized_kpis
 
 @app.get("/api/kpis/detailed")
@@ -74,21 +155,21 @@ def get_detailed_kpis(utility: str = "Alle Sparten"):
     if not get_unified_df:
         raise HTTPException(status_code=500, detail="Data utilities not loaded.")
 
+    _check_kpi_cache()
+    if utility in _KPI_CACHE["detailed_kpis"]:
+        return _KPI_CACHE["detailed_kpis"][utility]
+
     df = get_unified_df() if utility == "Alle Sparten" else get_utility_df(utility)
     if df.empty:
         raise HTTPException(status_code=404, detail=f"No data found for {utility}")
 
     def safe_int(val):
-        try:
-            return int(val)
-        except:
-            return 0
+        try: return int(val)
+        except: return 0
 
     def safe_float(val):
-        try:
-            return float(val)
-        except:
-            return 0.0
+        try: return float(val)
+        except: return 0.0
 
     def get_col_df(frame, candidates):
         for col in frame.columns:
@@ -97,21 +178,18 @@ def get_detailed_kpis(utility: str = "Alle Sparten"):
                 return frame[col]
         return pd.Series(dtype=object)
 
-    def yr(v):
-        if pd.isna(v):
-            return None
-        m = _re.search(r'(\d{4})', str(v))
-        if m:
-            y = int(m.group(1))
-            return y if 1900 < y < 2030 else None
-        return None
+    def vectorized_yr(series):
+        # Extract 4-digit years and convert to numeric efficiently
+        years = series.astype(str).str.extract(r'(\d{4})')[0]
+        years = pd.to_numeric(years, errors='coerce')
+        return years.where((years > 1900) & (years < 2030))
 
     try:
-        raw = load_excel()
+        raw = load_excel() # Hits the fast _DATA_CACHE now
     except Exception:
         raw = pd.DataFrame()
 
-    # ── 1. Anschlüsse ─────────────────────────────────────────────────
+    # -- 1. Anschlüsse -------------------------------------------------
     total  = len(df)
     wasser = safe_int((df["Sparte"] == "Wasser").sum())
     gas    = safe_int((df["Sparte"] == "Gas").sum())
@@ -146,7 +224,7 @@ def get_detailed_kpis(utility: str = "Alle Sparten"):
                 _has_type = _has_type | (_c == "Ja")
         unclassified = safe_int((~_has_type).sum())
 
-    # ── 2. Kritisch ───────────────────────────────────────────────────
+    # -- 2. Kritisch ---------------------------------------------------
     hoch        = safe_int((df["Risiko"] == "Hoch").sum())
     wasser_hoch = safe_int(((df["Sparte"] == "Wasser") & (df["Risiko"] == "Hoch")).sum())
     gas_hoch    = safe_int(((df["Sparte"] == "Gas")    & (df["Risiko"] == "Hoch")).sum())
@@ -157,21 +235,23 @@ def get_detailed_kpis(utility: str = "Alle Sparten"):
         wi_col = "Wasser (Letztes) Inspektionsdatum"
         gi_col = "Gas (Letztes) Inspektionsdatum"
         if wi_col in raw.columns:
-            wi = raw[wi_col].apply(yr)
+            wi = vectorized_yr(raw[wi_col])
             overdue_wasser = safe_int(((2026 - wi).dropna() > 5).sum())
         if gi_col in raw.columns:
-            gi = raw[gi_col].apply(yr)
+            gi = vectorized_yr(raw[gi_col])
             overdue_gas = safe_int(((2026 - gi).dropna() > 5).sum())
         insp_overdue = overdue_wasser + overdue_gas
 
-    # ── 3. Über Nutzungsdauer ─────────────────────────────────────────
+    # -- 3. Über Nutzungsdauer -----------------------------------------
     over_lifespan = renewal_next_10yr = renewal_next_20yr = 0
     age_gt_80 = age_gt_80_wasser = wasser_over = gas_over = oldest_asset_years = 0
     if not raw.empty:
         w_col = "Wasser Einbaudatum/ Fertigmeldung"
         g_col = "Gas Einbaudatum/ Fertigmeldung"
-        wa = raw[w_col].apply(yr).apply(lambda y: 2026 - y if y else None) if w_col in raw.columns else pd.Series(dtype=float)
-        ga = raw[g_col].apply(yr).apply(lambda y: 2026 - y if y else None) if g_col in raw.columns else pd.Series(dtype=float)
+        
+        wa = (2026 - vectorized_yr(raw[w_col])) if w_col in raw.columns else pd.Series(dtype=float)
+        ga = (2026 - vectorized_yr(raw[g_col])) if g_col in raw.columns else pd.Series(dtype=float)
+        
         wa_v = wa.dropna()
         ga_v = ga.dropna()
 
@@ -188,7 +268,7 @@ def get_detailed_kpis(utility: str = "Alle Sparten"):
         all_ages = pd.concat([wa_v, ga_v])
         oldest_asset_years = safe_int(all_ages.max()) if not all_ages.empty else 0
 
-    # ── 4. Materialrisiko ─────────────────────────────────────────────
+    # -- 4. Materialrisiko ---------------------------------------------
     werkstoff_col   = get_col_df(df, ["werkstoff"])
     az_count        = safe_int((werkstoff_col == "Asbestzement-(AZ)").sum()) if not werkstoff_col.empty else 0
     stahl_no_kks    = safe_int((werkstoff_col == "Stahl ohne KKS").sum()) if not werkstoff_col.empty else 0
@@ -196,7 +276,7 @@ def get_detailed_kpis(utility: str = "Alle Sparten"):
     schutzrohr_col  = get_col_df(df, ["schutzrohr"])
     schutzrohr_nein = safe_int(((df["Sparte"] == "Wasser") & (schutzrohr_col == "Nein")).sum()) if not schutzrohr_col.empty else 0
 
-    return {
+    result = {
         "anschluesse": {
             "total": total, "wasser": wasser, "gas": gas, "avg_age": avg_age,
             "haushalt": haushalt, "buero": buero, "industrie": industrie,
@@ -222,34 +302,86 @@ def get_detailed_kpis(utility: str = "Alle Sparten"):
             "msh_nein": msh_nein,
         },
     }
-
-class ChatMessage(BaseModel):
-    role: str
-    content: str
     
-class ChatRequest(BaseModel):
-    query: str
-    utility: Optional[str] = None
-    history: Optional[List[Dict[str, Any]]] = []
+    _KPI_CACHE["detailed_kpis"][utility] = result
+    return result
 
+# -------------------------------------------------------------
+# UPDATE ENDPOINT (FIXED)
+# -------------------------------------------------------------
+@app.post("/update-asset")
+def update_asset(req: UpdateRequest):
+    global engine
+
+    if not engine:
+        raise HTTPException(status_code=500, detail="Engine not ready")
+
+    # Clear caches
+    if _invalidate_cache:
+        _invalidate_cache()
+    _KPI_CACHE["kpis"].clear()
+    _KPI_CACHE["detailed_kpis"].clear()
+    
+    result = engine.apply_update(
+        customer_id=req.customer_id,
+        field_name=req.field_name,
+        new_value=req.new_value,
+        utility=req.utility,
+    )
+
+    return result
+
+# -------------------------------------------------------------
+# CHAT (NORMAL)
+# -------------------------------------------------------------
 @app.post("/api/chat")
 def chat(request: ChatRequest):
-    """Core RAG query endpoint"""
     if not engine:
         raise HTTPException(status_code=500, detail="RAG Engine not initialized.")
-    
-    try:
-        req_util = request.utility if request.utility != "Alle Sparten" else None
-        response = engine.answer_question(request.query, utility=req_util, history=request.history)
-        
-        # Safely extract pending_action or download links
-        return {
-            "answer": response.get("answer", "No answer found."),
-            "pending_action": response.get("pending_action", None)
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
+    req_util = request.utility if request.utility != "Alle Sparten" else None
+
+    response = engine.answer_question(
+        request.query,
+        utility=req_util,
+        history=request.history
+    )
+
+    return {
+        "answer": response.get("answer", ""),
+        "pending_action": response.get("pending_action", None),
+    }
+
+# -------------------------------------------------------------
+# CHAT STREAM (FIXED)
+# -------------------------------------------------------------
+@app.post("/api/chat/stream")
+def chat_stream(request: ChatRequest):
+    if not engine:
+        raise HTTPException(status_code=500, detail="RAG Engine not initialized.")
+
+    req_util = request.utility if request.utility != "Alle Sparten" else None
+
+    def generate():
+        yield from engine.stream_answer(
+            request.query,
+            utility=req_util,
+            history=request.history
+        )
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
+
+# -------------------------------------------------------------
+# ASSETS AND MAP ENDPOINTS (RESTORED)
+# -------------------------------------------------------------
 @app.get("/api/assets")
 def get_assets(utility: str = "Alle Sparten"):
     """Fetch detailed asset list and summaries for charts"""
@@ -258,37 +390,52 @@ def get_assets(utility: str = "Alle Sparten"):
         
     df = get_unified_df() if utility == "Alle Sparten" else get_utility_df(utility)
     if df.empty:
-        return {"records": [], "summary": {"age": [], "risk": []}}
+        return {"records": [], "summaries": {}}
 
-    # 1. Summary: Age Groups
-    age_bins = [0, 10, 20, 30, 100]
-    age_labels = ["0-10 J", "10-20 J", "20-30 J", "30+ J"]
-    df['AgeGroup'] = pd.cut(df['Alter'], bins=age_bins, labels=age_labels, right=False)
-    age_summary = df.groupby('AgeGroup', observed=True).size().reset_index(name='count')
-    age_data = []
-    for label in age_labels:
-        count = int(age_summary[age_summary['AgeGroup'] == label]['count'].sum())
-        age_data.append({"name": label, "value": count})
+    def get_summary_for_df(frame):
+        # 1. Summary: Age Groups
+        age_bins = [0, 10, 20, 30, 100]
+        age_labels = ["0-10 J", "10-20 J", "20-30 J", "30+ J"]
+        # Use a copy to avoid SettingWithCopyWarning
+        temp_df = frame.copy()
+        temp_df['AgeGroup'] = pd.cut(temp_df['Alter'], bins=age_bins, labels=age_labels, right=False)
+        age_summary = temp_df.groupby('AgeGroup', observed=True).size().reset_index(name='count')
+        age_data = []
+        for label in age_labels:
+            count = int(age_summary[age_summary['AgeGroup'] == label]['count'].sum())
+            age_data.append({"name": label, "value": count})
 
-    # 2. Summary: Risk distribution
-    risk_summary = df['Risiko'].value_counts().to_dict()
-    risk_data = [
-        {"name": "Hoch", "value": int(risk_summary.get("Hoch", 0)), "color": "#ef4444"},
-        {"name": "Mittel", "value": int(risk_summary.get("Mittel", 0)), "color": "#f59e0b"},
-        {"name": "Niedrig", "value": int(risk_summary.get("Niedrig", 0)), "color": "#22c55e"},
-    ]
+        # 2. Summary: Risk distribution
+        risk_summary = temp_df['Risiko'].value_counts().to_dict()
+        risk_data = [
+            {"name": "Hoch", "value": int(risk_summary.get("Hoch", 0)), "color": "#ef4444"},
+            {"name": "Mittel", "value": int(risk_summary.get("Mittel", 0)), "color": "#f59e0b"},
+            {"name": "Niedrig", "value": int(risk_summary.get("Niedrig", 0)), "color": "#22c55e"},
+        ]
+        return {"age": age_data, "risk": risk_data}
+
+    summaries = {}
+    if utility == "Alle Sparten":
+        # Get separate summaries for Gas and Water
+        gas_df = df[df["Sparte"] == "Gas"]
+        water_df = df[df["Sparte"] == "Wasser"]
+        if not gas_df.empty:
+            summaries["Gas"] = get_summary_for_df(gas_df)
+        if not water_df.empty:
+            summaries["Wasser"] = get_summary_for_df(water_df)
+    else:
+        summaries[utility] = get_summary_for_df(df)
 
     # 3. Records for table (last 100 rows)
     records = df.tail(100).to_dict('records')
     clean_records = []
     for r in records:
-        # Step-by-step cleaning to ensure JSON compatibility
         row = {}
         for k, v in r.items():
-            key = str(k) # Handle non-string keys
+            key = str(k)
             if pd.isna(v):
                 row[key] = None
-            elif hasattr(v, 'item'): # Handle numpy scalars
+            elif hasattr(v, 'item'):
                 row[key] = v.item()
             elif isinstance(v, (pd.Timestamp, pd.Period)):
                 row[key] = str(v)
@@ -298,10 +445,7 @@ def get_assets(utility: str = "Alle Sparten"):
 
     return {
         "records": clean_records,
-        "summary": {
-            "age": age_data,
-            "risk": risk_data
-        }
+        "summaries": summaries
     }
 
 @app.get("/api/map-explorer")
@@ -338,6 +482,27 @@ def get_map_explorer(utility: str = "Alle Sparten"):
 
     return {"records": clean_records}
 
+# -------------------------------------------------------------
+# HEALTH
+# -------------------------------------------------------------
+@app.get("/api/health")
+def health_check():
+    if not engine:
+        return {"status": "backend_degraded", "llm_available": False}
+
+    status = engine.check_llm_status()["msg"]
+    kb_count = engine.vs.count() if hasattr(engine, 'vs') else 0
+
+    return {
+        "status": "ok",
+        "llm": status,
+        "kb_count": kb_count
+    }
+
+
+# -------------------------------------------------------------
+# RUN
+# -------------------------------------------------------------
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("fastapi_server:app", host="127.0.0.1", port=8000, reload=True)
